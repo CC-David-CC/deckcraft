@@ -89,6 +89,9 @@ pub fn all_commands(app: &SlideApp) -> Value {
 pub fn inspect(app: &SlideApp, ctx: &egui::Context) -> Value {
     let r = ctx.content_rect();
     json!({
+        "documentTargeting": "active-precondition-v1",
+        "documentId": app.session.active().map(|d| d.uid.to_string()),
+        "revision": app.session.active().map(|d| d.revision.to_string()),
         "ui": serde_json::to_value(&app.ui).unwrap_or_default(),
         "tool": serde_json::to_value(&app.session.tool.kind).unwrap_or_default(),
         "window": [r.width(), r.height()],
@@ -107,7 +110,7 @@ pub fn inspect(app: &SlideApp, ctx: &egui::Context) -> Value {
             s.showing_value(n, aspect, ctx.content_rect(), now)
         }),
         "animPreview": app.anim_preview_report().map(|(slide, time, duration)| json!({"slide": slide, "time": time, "duration": duration})),
-        "documents": app.session.documents().iter().map(|d| json!({"title": d.title(), "dirty": d.is_dirty(), "path": d.path})).collect::<Vec<_>>(),
+        "documents": app.session.documents().iter().map(|d| json!({"documentId": d.uid.to_string(), "revision": d.revision.to_string(), "title": d.title(), "dirty": d.is_dirty(), "path": d.path})).collect::<Vec<_>>(),
         "pendingSaves": app.pending_host_saves.iter().map(|(id, save)| (id, json!({
             "documentId": save.snapshot.document_id().to_string(),
             "revision": save.snapshot.revision().to_string(),
@@ -138,9 +141,31 @@ fn f(p: &Value, k: &str) -> Option<f32> {
     p.get(k).and_then(Value::as_f64).map(|v| v as f32)
 }
 
+/// A caller's captured identity is a precondition, not a request to change focus or a grant.
+/// Check immediately before dispatch; a host may have awaited authorization while focus moved.
+fn check_document_target(app: &SlideApp, params: &Value) -> Result<(), &'static str> {
+    let Some(value) = params.get("documentId") else { return Ok(()) };
+    let id = value
+        .as_str()
+        .filter(|id| !id.is_empty() && id.len() <= 20 && id.bytes().all(|b| b.is_ascii_digit()))
+        .ok_or("Invalid explicit document target")?;
+    if app.session.active().is_none_or(|d| d.uid.to_string() != id) {
+        return Err("The target document is no longer active");
+    }
+    if let Some(inner) = params.get("params").and_then(|p| p.get("documentId"))
+        && inner.as_str() != Some(id)
+    {
+        return Err("Conflicting document targets");
+    }
+    Ok(())
+}
+
 /// Dispatch one decoded control request and return an outcome for its caller to reply with.
 pub fn handle(app: &mut SlideApp, ctx: &egui::Context, req: &ControlRequest) -> Outcome {
     let p = &req.params;
+    if let Err(error) = check_document_target(app, p) {
+        return err(error);
+    }
     let s = |k: &str| p.get(k).and_then(Value::as_str);
     match req.method.as_str() {
         "engine.execute" | "ui.menu.invoke" | "command" => {

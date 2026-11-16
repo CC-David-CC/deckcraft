@@ -507,3 +507,6 @@ mod host_save_tests;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod control_target_tests;

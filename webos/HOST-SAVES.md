@@ -41,3 +41,15 @@ component's internal state or to account files. Exports still use the existing
 uncorrelated copy callback and are not confirmed account saves.
 
 Revision: WEBOS-70 — shared captured-save wire and explicit non-success replies.
+
+## Captured command targets
+
+Use `request(method, {documentId, ...params})` with the captured active document UID.
+The native control owner validates it at dispatch, after any host authorization
+wait. Stale or conflicting targets fail before commands or host save callbacks
+run. `ui.inspect.documentTargeting` advertises `active-precondition-v1`; its
+active and per-document identity/revision fields are authoritative editor state.
+This check is neither authentication nor automatic focus routing. The real
+Desktop/account adapter and scoped agent transport remain separate open gates.
+
+Revision: WEBOS-72 — native queued-command target validation.

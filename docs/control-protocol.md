@@ -64,3 +64,23 @@ its group path; text actions also identify the paragraph/run and run text, plus 
 for table text. Actions report their `event` (`click`, `hover`, `textLink`, or `textHover`),
 `type`, `target`, and full `hyperlink`. Inspection never runs an action. A slide without actions
 returns `"actions": []`.
+
+## Captured active-document precondition (WebOS fork)
+
+Any method may include `documentId` in its parameter object. It must be the exact
+nonempty decimal UID string returned by `document.inspect` (at most20 digits).
+The UI owner checks it immediately before dispatching the queued request. If
+focus changed, the document closed, the value is malformed, or an inner command
+parameter names a different document, the request fails without running it.
+This precondition does not change focus or provide background-document execution.
+Calls omitting it retain the existing current-focus behavior; account-hosted and
+authorized caller adapters must always supply their captured document target.
+
+`ui.inspect` advertises `documentTargeting: "active-precondition-v1"`, returns
+active `documentId` and `revision`, and includes those fields for every entry in
+`documents`. Values come from the real Session/DocState, not an adapter model.
+Document revisions and identities grant no account access. The hosting layer
+still authenticates the caller and scopes instance, session and account resource;
+it must not substitute a human capability for an omitted caller.
+
+Revision: WEBOS-72 — dispatch-time active-document precondition and identity inspection.

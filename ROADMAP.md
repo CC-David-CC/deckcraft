@@ -1,5 +1,10 @@
 # DeckCraft roadmap
 
+WebOS fork WEBOS-72: native control checks captured active-document identity at
+dispatch and exposes real per-document IDs/revisions. Stale or conflicting
+targets fail before mutation or host save delivery; parity scores unchanged.
+
+
 WebOS fork WEBOS-70: document saves use the shared captured-identity host protocol;
 explicit failed/cancelled/conflict/unknown replies feed the existing pending-save
 state machine. Account-storage and export integration remain open; parity scores
