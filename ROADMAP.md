@@ -1,5 +1,11 @@
 # DeckCraft roadmap
 
+WebOS fork WEBOS-70: document saves use the shared captured-identity host protocol;
+explicit failed/cancelled/conflict/unknown replies feed the existing pending-save
+state machine. Account-storage and export integration remain open; parity scores
+are unchanged.
+
+
 **Stage: alpha** · next: beta, ~20 points and ~120–210 h away
 
 > **Last reviewed:** 2026-11-04 · **Last updated:** 2026-11-11 · **Change:** trivial (slide-list entries with missing relationships are reported as lost slides and open as repaired copies; the Opus decoder and the Ogg, MP4 and Matroska demuxers come from craft-libs; parity scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)

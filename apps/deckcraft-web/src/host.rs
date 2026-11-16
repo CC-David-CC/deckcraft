@@ -15,9 +15,9 @@
 //!   as its file, so Save goes back to it; an outline (.txt, .md, .rtf), a file without a name and
 //!   a damaged file open untitled.
 //! - `deckcraft:save` (to the host): `{ name, saveAs, bytes }` (with the bytes as a transferred `ArrayBuffer` over `postMessage`) for
-//!   every file DeckCraft would otherwise download. Document saves carry an `id`; the host
+//!   every file DeckCraft would otherwise download. Document saves carry `id`, `documentId`, editor `revision`, `operation` and `documentSave: true`; the host
 //!   answers `deckcraft:saved { id }` only after durable storage. Until confirmation the
-//!   captured document remains unsaved. Exports remain copies. `saveAs` says whether the file becomes the presentation's file:
+//!   captured document remains unsaved. `deckcraft:save-failed` carries an explicit failed/cancelled/conflict/unknown outcome; unknown retains the no-retry guard. Exports remain copies. `saveAs` says whether the file becomes the presentation's file:
 //!   - Save: `false`. It writes the opened file under its own name and format (a .pptx stays a
 //!     .pptx), as the desktop app does. A name the parent never sent (an untitled presentation, an
 //!     outline, a file sent without a name, a repaired copy of a damaged file, a file the user
@@ -38,6 +38,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use craft_web_host::web::{FileData, Host, Message};
+use craft_web_host::{SaveContext, SaveFailureKind};
 use deckcraft_ui_egui::{HostSaveContext, Inbox, InboxEvent, Services, SlideApp};
 
 /// The app id in the host messages (`deckcraft:ready`).
@@ -83,7 +84,16 @@ impl Bridge {
         self.listen(ctx, inbox);
         let bridge = self.clone();
         services.host_save = Some(Box::new(move |name: &str, bytes: &[u8], save_as: bool, context: &HostSaveContext| {
-            bridge.post_save(name, bytes, save_as, Some(&context.id))
+            let document_id = context.document.to_string();
+            let revision = context.revision.to_string();
+            let captured = SaveContext {
+                id: &context.id,
+                document_id: &document_id,
+                revision: &revision,
+                operation: if save_as { "file.saveAs" } else { "file.save" },
+                document_save: true,
+            };
+            bridge.post_identified_save(name, bytes, save_as, &captured)
         }));
         // Exports and Print are copies.
         let bridge = self.clone();
@@ -130,6 +140,11 @@ impl Bridge {
         self.host.post_save(&name, bytes, id, save_as)
     }
 
+    fn post_identified_save(&self, path: &str, bytes: &[u8], save_as: bool, context: &SaveContext<'_>) -> Result<(), String> {
+        let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| path.to_string());
+        self.host.post_identified_save(&name, bytes, save_as, context)
+    }
+
     /// Hear `deckcraft:open` and queue the file for the next frame.
     fn listen(&self, ctx: egui::Context, inbox: Inbox) {
         let opened = self.opened.clone();
@@ -140,6 +155,15 @@ impl Bridge {
                     match inbox.lock() {
                         Ok(mut events) => events.push(InboxEvent::HostSaved { id }),
                         Err(poisoned) => poisoned.into_inner().push(InboxEvent::HostSaved { id }),
+                    }
+                    ctx.request_repaint();
+                    return;
+                }
+                Message::SaveFailed { id, outcome, error } => {
+                    let event = InboxEvent::HostSaveFailed { id, error, uncertain: outcome == SaveFailureKind::Unknown };
+                    match inbox.lock() {
+                        Ok(mut events) => events.push(event),
+                        Err(poisoned) => poisoned.into_inner().push(event),
                     }
                     ctx.request_repaint();
                     return;
