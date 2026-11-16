@@ -67,7 +67,7 @@ fn path(app: &SlideApp) -> Option<String> {
 #[test]
 fn host_saves_go_back_to_the_opened_file() {
     let (mut app, got) = host_app(false);
-    app.open_from_host(Some("Lecture 3.pptx"), &pptx(2));
+    app.open_from_host(Some("Lecture 3.pptx"), &pptx(2)).unwrap();
     assert_eq!(app.session.documents().len(), 1, "the untouched blank presentation gave way");
     edit(&mut app);
     app.save();
@@ -120,7 +120,7 @@ fn a_file_the_page_never_sent_saves_as_a_new_file() {
 #[test]
 fn host_exports_and_print_are_copies() {
     let (mut app, got) = host_app(false);
-    app.open_from_host(Some("deck.pptx"), &pptx(1));
+    app.open_from_host(Some("deck.pptx"), &pptx(1)).unwrap();
     edit(&mut app);
     assert!(app.export_as("pdf", json!({})));
     assert!(app.print_pdf(json!({})));
@@ -133,7 +133,7 @@ fn host_exports_and_print_are_copies() {
 #[test]
 fn a_host_save_that_fails_leaves_the_presentation_unsaved() {
     let (mut app, _) = host_app(true);
-    app.open_from_host(Some("deck.pptx"), &pptx(1));
+    app.open_from_host(Some("deck.pptx"), &pptx(1)).unwrap();
     edit(&mut app);
     app.save();
     app.drain_inbox();
@@ -146,7 +146,7 @@ fn a_host_save_that_fails_leaves_the_presentation_unsaved() {
 fn an_edited_start_presentation_stays_open() {
     let (mut app, _) = host_app(false);
     edit(&mut app);
-    app.open_from_host(Some("deck.pptx"), &pptx(1));
+    app.open_from_host(Some("deck.pptx"), &pptx(1)).unwrap();
     assert_eq!(app.session.documents().len(), 2);
     assert_eq!(path(&app).as_deref(), Some("deck.pptx"));
 }
@@ -157,8 +157,8 @@ fn an_edited_start_presentation_stays_open() {
 #[test]
 fn only_the_first_file_from_the_page_replaces_the_start_presentation() {
     let (mut app, _) = host_app(false);
-    app.open_from_host(None, &pptx(2));
-    app.open_from_host(Some("deck.pptx"), &pptx(3));
+    app.open_from_host(None, &pptx(2)).unwrap();
+    app.open_from_host(Some("deck.pptx"), &pptx(3)).unwrap();
     let slides: Vec<usize> = app.session.documents().iter().map(|d| d.doc.slides.len()).collect();
     assert_eq!(slides, [2, 3], "the file sent without a name stays open beside the next one");
     assert_eq!(path(&app).as_deref(), Some("deck.pptx"));
@@ -169,7 +169,7 @@ fn only_the_first_file_from_the_page_replaces_the_start_presentation() {
 #[test]
 fn palette_save_goes_to_the_page() {
     let (mut app, got) = host_app(false);
-    app.open_from_host(Some("deck.pptx"), &pptx(1));
+    app.open_from_host(Some("deck.pptx"), &pptx(1)).unwrap();
     edit(&mut app);
     let r = app.run("file.save", json!({})).unwrap();
     assert_eq!(r["pending"], "save");
@@ -188,7 +188,7 @@ fn palette_save_goes_to_the_page() {
 fn a_file_sent_without_a_presentation_name_saves_as_a_new_file() {
     for (name, saved) in [(None, "Presentation.deckcraft"), (Some("Talk"), "Talk.deckcraft")] {
         let (mut app, got) = host_app(false);
-        app.open_from_host(name, &pptx(2));
+        app.open_from_host(name, &pptx(2)).unwrap();
         assert_eq!(app.session.documents().len(), 1, "{name:?}");
         assert_eq!(app.session.active().unwrap().doc.slides.len(), 2, "{name:?}");
         assert_eq!(path(&app), None, "{name:?}");
@@ -203,7 +203,7 @@ fn a_file_sent_without_a_presentation_name_saves_as_a_new_file() {
 #[test]
 fn an_outline_from_the_page_opens_as_a_new_presentation() {
     let (mut app, got) = host_app(false);
-    app.open_from_host(Some("notes.md"), b"# One\n\n# Two\n\n# Three\n");
+    app.open_from_host(Some("notes.md"), b"# One\n\n# Two\n\n# Three\n").unwrap();
     assert_eq!(app.session.documents().len(), 1);
     assert_eq!(app.session.active().unwrap().doc.slides.len(), 3);
     assert_eq!(path(&app), None);
@@ -223,7 +223,7 @@ fn a_damaged_file_from_the_page_saves_as_a_new_repaired_file() {
     let at = bad.windows(13).position(|w| w == b"PICTURE-BYTES").unwrap();
     bad[at] ^= 0xff;
     let (mut app, got) = host_app(false);
-    app.open_from_host(Some("talk.deckcraft"), &bad);
+    app.open_from_host(Some("talk.deckcraft"), &bad).unwrap();
     assert_eq!(path(&app), None);
     assert!(app.session.active().unwrap().title().ends_with("(Repaired)"));
     app.save();

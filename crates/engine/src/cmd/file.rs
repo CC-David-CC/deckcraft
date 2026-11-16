@@ -99,6 +99,12 @@ fn templates(_s: &mut Session, _p: &Value) -> Result<Value> {
     }))
 }
 
+/// Snapshot the identity of the document this operation just created, before returning.
+fn opened_identity(s: &Session, index: usize) -> Result<Value> {
+    let st = s.documents().get(index).ok_or_else(|| EngineError::Other("opened document is unavailable".into()))?;
+    Ok(json!({"document":index,"documentId":st.uid.to_string(),"revision":st.revision.to_string(),"path":st.path}))
+}
+
 fn new(s: &mut Session, p: &Value) -> Result<Value> {
     let template = str_param(p, "template").filter(|t| !t.is_empty());
     let theme_name = str_param(p, "theme").filter(|t| !t.is_empty());
@@ -120,7 +126,8 @@ fn new(s: &mut Session, p: &Value) -> Result<Value> {
     let slides = doc.slides.len();
     let title = s.next_untitled();
     let i = s.add_document(DocState::new(doc, None, title));
-    let mut out = json!({"document": i, "slides": slides});
+    let mut out = opened_identity(s, i)?;
+    out["slides"] = json!(slides);
     if let Some(name) = template_name {
         out["template"] = json!(name);
     }
@@ -274,10 +281,12 @@ fn adopt_loaded(s: &mut Session, f: LoadedFile) -> Result<Value> {
     let i = add_opened(s, &path, keep_path.then(|| path.clone()), doc);
     report_damage(s, &damaged)?;
     let st = s.doc()?;
-    Ok(json!({
-        "document": i, "slides": st.doc.slides.len(), "missingFonts": st.missing_fonts,
-        "damagedMedia": damaged.media, "lostSlides": damaged.slides,
-    }))
+    let mut out = opened_identity(s, i)?;
+    out["slides"] = json!(st.doc.slides.len());
+    out["missingFonts"] = json!(st.missing_fonts);
+    out["damagedMedia"] = json!(damaged.media);
+    out["lostSlides"] = json!(damaged.slides);
+    Ok(out)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -311,7 +320,11 @@ fn open_bytes(s: &mut Session, p: &Value) -> Result<Value> {
     let (doc, damaged) = open_checked(name, &data)?;
     let i = add_opened(s, name, None, doc);
     report_damage(s, &damaged)?;
-    Ok(json!({"document": i, "missingFonts": s.doc()?.missing_fonts, "damagedMedia": damaged.media, "lostSlides": damaged.slides}))
+    let mut out = opened_identity(s, i)?;
+    out["missingFonts"] = json!(s.doc()?.missing_fonts);
+    out["damagedMedia"] = json!(damaged.media);
+    out["lostSlides"] = json!(damaged.slides);
+    Ok(out)
 }
 
 /// Tell the user which pictures, media and slides a damaged file lost, and mark the copy repaired.

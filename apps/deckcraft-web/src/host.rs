@@ -8,8 +8,8 @@
 //!   `CustomEvent`s on the canvas instead. `?host=parent` wins when both are present. With no
 //!   parent, or a parent on another origin, there is no bridge: the normal app with downloads.
 //! - `deckcraft:ready` (to the host): sent once the app is running and listening; send a file now. DeckCraft
-//!   reads bytes, so it says `file: false` and a host sends `bytes`.
-//! - `deckcraft:open` (from the host): `{ name, bytes }`, bytes an `ArrayBuffer` or
+//!   reads bytes, so it says `file: false` and a host sends `bytes`. `openResult: true` advertises correlated adoption results.
+//! - `deckcraft:open` (from the host): `{ id?, name, bytes }`, bytes an `ArrayBuffer` or
 //!   `Uint8Array`, name a bare file name. It opens like a file picked with File › Open on the
 //!   desktop: a presentation sent with its name (.pptx, .potx, .ppsx, .deckcraft) has that name
 //!   as its file, so Save goes back to it; an outline (.txt, .md, .rtf), a file without a name and
@@ -38,7 +38,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use craft_web_host::web::{FileData, Host, Message};
-use craft_web_host::{SaveContext, SaveFailureKind};
+use craft_web_host::{OpenResult, SaveContext, SaveFailureKind};
 use deckcraft_ui_egui::{HostSaveContext, Inbox, InboxEvent, Services, SlideApp};
 
 /// The app id in the host messages (`deckcraft:ready`).
@@ -56,11 +56,17 @@ const MAX_OPEN_BYTES: f64 = 2_147_483_648.0;
 /// The longest user name taken from `?author=` (the preferences' own limit).
 const MAX_AUTHOR_CHARS: usize = 256;
 
+struct PendingOpen {
+    id: Option<String>,
+    name: Option<String>,
+    bytes: Vec<u8>,
+}
+
 #[derive(Clone)]
 pub struct Bridge {
     host: Rc<Host>,
     /// Files the host sent (the name, if it sent one), waiting for the next frame.
-    opened: Rc<RefCell<Vec<(Option<String>, Vec<u8>)>>>,
+    opened: Rc<RefCell<Vec<PendingOpen>>>,
 }
 
 impl Bridge {
@@ -113,7 +119,7 @@ impl Bridge {
     }
 
     pub fn post_ready(&self) {
-        let _ = self.host.post_ready(env!("CARGO_PKG_VERSION"), false);
+        let _ = self.host.post_ready_with_open_results(env!("CARGO_PKG_VERSION"), false);
     }
 
     /// The app couldn't start (no WebGPU or WebGL2, for example): let the host say so.
@@ -124,8 +130,23 @@ impl Bridge {
     /// Before each frame: open the files the host sent.
     pub fn open_files(&self, app: &mut SlideApp) {
         let opened = std::mem::take(&mut *self.opened.borrow_mut());
-        for (name, bytes) in opened {
-            app.open_from_host(name.as_deref(), &bytes);
+        for pending in opened {
+            match app.open_from_host(pending.name.as_deref(), &pending.bytes) {
+                Ok(outcome) => {
+                    if let Some(id) = pending.id.as_deref() {
+                        let document_id = outcome.document_id.to_string();
+                        let revision = outcome.revision.to_string();
+                        let result =
+                            OpenResult { id, document_id: &document_id, revision: &revision, source_retained: outcome.source_path.is_some() };
+                        if let Err(error) = self.host.post_opened(&result) {
+                            log::warn!("couldn't report opened document: {error}");
+                        }
+                    }
+                }
+                Err(error) => {
+                    let _ = self.host.post_failed(&error, pending.id.as_deref());
+                }
+            }
         }
     }
 
@@ -150,7 +171,7 @@ impl Bridge {
         let opened = self.opened.clone();
         let host = self.host.clone();
         self.host.listen(move |message| {
-            let (name, data) = match message {
+            let (id, name, data) = match message {
                 Message::Saved { id } => {
                     match inbox.lock() {
                         Ok(mut events) => events.push(InboxEvent::HostSaved { id }),
@@ -168,21 +189,28 @@ impl Bridge {
                     ctx.request_repaint();
                     return;
                 }
-                Message::Open { name, data } => (name, data),
+                Message::Open { name, data } => (None, name, data),
+                Message::IdentifiedOpen { id, name, data } => (Some(id), name, data),
                 _ => return,
             };
             if data.size() >= MAX_OPEN_BYTES {
                 log::warn!("host file {name} is 2 GiB or larger; not opened");
-                let _ = host.post_failed(&format!("{name} is 2 GiB or larger, which DeckCraft's web build cannot open"), None);
+                let _ = host.post_failed(&format!("{name} is 2 GiB or larger, which DeckCraft's web build cannot open"), id.as_deref());
                 return;
             }
             let FileData::Bytes(array) = data else {
                 log::warn!("host file {name} came as a File; DeckCraft reads bytes only; not opened");
+                let _ = host.post_failed("DeckCraft requires transferred bytes for this open", id.as_deref());
                 return;
             };
+            // Bound queued copies before allocating another native byte buffer.
+            if opened.borrow().len() >= 8 {
+                let _ = host.post_failed("Too many host opens are pending", id.as_deref());
+                return;
+            }
             // No name is no file: the presentation opens untitled, never under an invented name.
             let name = (name != NAMELESS).then_some(name);
-            opened.borrow_mut().push((name, array.to_vec()));
+            opened.borrow_mut().push(PendingOpen { id, name, bytes: array.to_vec() });
             ctx.request_repaint();
         });
     }

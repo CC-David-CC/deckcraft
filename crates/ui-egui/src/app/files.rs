@@ -626,7 +626,7 @@ impl SlideApp {
     /// file. The first presentation that opens takes the place of the empty one host mode started
     /// with ([`Self::start_for_host`]), if that one is still open, untitled and unchanged; later
     /// files open beside the others.
-    pub fn open_from_host(&mut self, name: Option<&str>, bytes: &[u8]) {
+    pub fn open_from_host(&mut self, name: Option<&str>, bytes: &[u8]) -> Result<crate::HostOpenOutcome, String> {
         let blank = self.host_start.filter(|&uid| self.session.documents().iter().any(|d| d.uid == uid && d.path.is_none() && !d.is_dirty()));
         let before = self.session.documents().len();
         let shown = name.unwrap_or("Presentation");
@@ -638,22 +638,29 @@ impl SlideApp {
             let token = self.session.stage_loaded(f);
             self.session.execute("file.adopt", &json!({"path": shown, "token": token}))
         });
-        if let Err(e) = opened {
-            self.notify(e.to_string());
+        let opened = opened.map_err(|error| error.to_string());
+        if let Err(error) = &opened {
+            self.notify(error.clone());
         }
         self.drain_requests();
+        let result = opened?;
+        let uid = result
+            .get("documentId")
+            .and_then(Value::as_str)
+            .and_then(|id| id.parse::<u64>().ok())
+            .ok_or("Host adoption did not return its document identity")?;
         if self.session.documents().len() <= before {
-            return;
+            return Err("Host adoption did not create a document".into());
         }
         self.host_start = None;
-        if let Some(opened) = self.session.active().map(|d| d.uid)
-            && let Some(i) = self.session.documents().iter().position(|d| Some(d.uid) == blank)
-        {
+        if let Some(i) = self.session.documents().iter().position(|d| Some(d.uid) == blank) {
             self.session.close_document(i);
-            if let Some(i) = self.session.documents().iter().position(|d| d.uid == opened) {
+            if let Some(i) = self.session.documents().iter().position(|d| d.uid == uid) {
                 self.session.set_active(i);
             }
         }
+        let st = self.session.documents().iter().find(|d| d.uid == uid).ok_or("Opened document is unavailable")?;
+        Ok(crate::HostOpenOutcome { document_id: st.uid, revision: st.revision, source_path: st.path.clone() })
     }
 
     /// Host mode (`?host=parent`) starts with an empty presentation instead of the sample, for

@@ -11,6 +11,15 @@ pub type OpenAsyncFn = Box<dyn FnMut(&str, u64)>;
 
 pub type DownloadFn = Box<dyn FnMut(&str, &[u8])>;
 
+/// Successful native host adoption, captured while the new document is still identified.
+/// No account path, server revision or permission is inferred from these editor fields.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HostOpenOutcome {
+    pub document_id: u64,
+    pub revision: u64,
+    pub source_path: Option<String>,
+}
+
 /// Identity captured at serialization, before dispatch to the host.
 #[derive(Clone, Debug)]
 pub struct HostSaveContext {

@@ -53,3 +53,24 @@ This check is neither authentication nor automatic focus routing. The real
 Desktop/account adapter and scoped agent transport remain separate open gates.
 
 Revision: WEBOS-72 — native queued-command target validation.
+
+## Correlated binary adoption
+
+`ready.openResult: true` advertises native adoption results. Send a bounded `id`
+with binary `deckcraft:open`; only after actual adoption the bridge replies
+`deckcraft:opened {id,documentId,revision,sourceRetained}`. Failures use the same
+request ID in `deckcraft:failed`. Do not bind by a later active-document query or
+list index. The result belongs to the document created by that operation.
+
+The same native adoption path keeps the source of valid named presentations,
+leaves repaired/converted/unnamed input source-less, and replaces only the
+untouched original host blank. Changed blanks and later documents remain.
+The queue holds at most eight pending byte copies; this bounds transient work.
+Native creation/open/adoption command responses also return documentId,
+revision and path alongside their existing fields.
+
+The host maps the request to its captured instance/session/account resource and
+server SHA. Neither this response nor sourceRetained grants access. Exports and
+real Desktop/UserFiles/agent integration remain open.
+
+Revision: WEBOS-74 — correlated binary adoption and stable operation outcomes.

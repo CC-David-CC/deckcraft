@@ -922,3 +922,6 @@ mod tests_keys;
 
 #[cfg(test)]
 mod host_save_tests;
+
+#[cfg(test)]
+mod adoption_identity_tests;

@@ -1,5 +1,10 @@
 # DeckCraft roadmap
 
+WebOS fork WEBOS-74: correlated binary host adoption returns stable native
+identity, revision and source-retention status after the real operation;
+startup blank and repaired/converted-copy behavior retained; parity unchanged.
+
+
 WebOS fork WEBOS-72: native control checks captured active-document identity at
 dispatch and exposes real per-document IDs/revisions. Stale or conflicting
 targets fail before mutation or host save delivery; parity scores unchanged.

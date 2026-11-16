@@ -84,3 +84,9 @@ still authenticates the caller and scopes instance, session and account resource
 it must not substitute a human capability for an omitted caller.
 
 Revision: WEBOS-72 — dispatch-time active-document precondition and identity inspection.
+
+Creation, open and adoption command results include `documentId`, `revision`
+and `path`, captured by that operation. `document` remains the existing list
+index and may shift later. `file.openBytes` still opens a source-less copy;
+valid host adoption keeps source identity through the ordinary adoption path.
+These results identify editor state, not server files or authorization.

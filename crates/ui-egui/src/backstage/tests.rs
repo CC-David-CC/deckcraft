@@ -454,7 +454,7 @@ fn host_save_as_under_the_same_name_returns_to_the_slide() {
     let mut app = SlideApp::new(Session::new(), services);
     app.start_for_host().unwrap();
     let deck = deckcraft_engine::cmd::file::save_bytes(&Session::with_new().doc().unwrap().doc, "pptx").unwrap();
-    app.open_from_host(Some("deck.pptx"), &deck);
+    app.open_from_host(Some("deck.pptx"), &deck).unwrap();
     let mut h = harness(app);
     h.state_mut().run("app.backstage", json!({"page": "saveAs"})).unwrap();
     h.run_steps(3);
