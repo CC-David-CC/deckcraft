@@ -187,6 +187,7 @@ pub(super) fn save_as(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage, out: 
                 let snapshot = |app: &SlideApp| app.session.active().map(|d| (d.path.clone(), d.is_dirty(), d.revision));
                 let before = snapshot(app);
                 app.save_as_dialog(fmt);
+                app.return_after_host_save(crate::backstage::Page::SaveAs, bs.instance.clone());
                 web || snapshot(app) != before
             } else {
                 app.export_as(fmt, json!({}))

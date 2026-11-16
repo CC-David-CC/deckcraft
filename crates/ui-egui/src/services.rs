@@ -11,9 +11,17 @@ pub type OpenAsyncFn = Box<dyn FnMut(&str, u64)>;
 
 pub type DownloadFn = Box<dyn FnMut(&str, &[u8])>;
 
-/// [`Services::host_save`]: `(file name, bytes, save_as)`. An error means the page didn't get
-/// the file, and the save failed.
-pub type HostSaveFn = Box<dyn FnMut(&str, &[u8], bool) -> Result<(), String>>;
+/// Identity captured at serialization, before dispatch to the host.
+#[derive(Clone, Debug)]
+pub struct HostSaveContext {
+    pub id: String,
+    pub document: u64,
+    pub revision: u64,
+}
+
+/// Dispatch a document save. `Ok` means accepted for delivery, never durable success.
+/// The host must later send `InboxEvent::HostSaved` or `HostSaveFailed` for this id.
+pub type HostSaveFn = Box<dyn FnMut(&str, &[u8], bool, &HostSaveContext) -> Result<(), String>>;
 
 /// A file the host finished reading for the request `id` from [`SlideApp::begin_external_file`].
 #[derive(Clone, Debug)]
@@ -27,6 +35,16 @@ pub struct InboxFile {
 /// What the host delivers through [`Inbox`] after an asynchronous read.
 #[derive(Clone, Debug)]
 pub enum InboxEvent {
+    /// Durable confirmation for the exact dispatched snapshot.
+    HostSaved {
+        id: String,
+    },
+    /// Failure or uncertainty: keep edits and the prior resource identity.
+    HostSaveFailed {
+        id: String,
+        error: String,
+        uncertain: bool,
+    },
     File(InboxFile),
     /// The picker was dismissed or the file could not be read. `id` will not be applied.
     Cancelled {
@@ -58,8 +76,8 @@ pub struct Services {
     /// ([`HostSaveFn`]). Save writes a presentation the page sent back under its own name and
     /// format, as the desktop app writes back to the file it opened; a presentation the page
     /// never sent (an untitled one, a repaired copy) goes as a new `.deckcraft` file, as Save
-    /// suggests on the desktop. Save As (.pptx or .deckcraft) is always a new file. Either way the
-    /// presentation is then that file, and the next Save goes to it. Exports and Print still go
+    /// suggests on the desktop. Save As (.pptx or .deckcraft) is always a new file. Only after
+    /// acknowledgement is the presentation that file, and the next Save goes to it. Exports and Print still go
     /// through `download`, which the host also points at the page: they are copies.
     pub host_save: Option<HostSaveFn>,
     pub inbox: Option<Inbox>,

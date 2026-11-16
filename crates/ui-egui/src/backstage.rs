@@ -166,6 +166,8 @@ pub enum ExportTask {
 /// The File tab's state while it is open.
 #[derive(Clone, Debug)]
 pub struct Backstage {
+    /// Identity of this view lifetime; a pending completion must not close a reopened view.
+    pub(crate) instance: std::rc::Rc<()>,
     pub page: Page,
     /// The open presentations (count, active) when it opened: a change closes it.
     pub docs: (usize, Option<u64>),
@@ -199,6 +201,7 @@ impl Backstage {
     /// can be detected.
     pub fn new(page: Page, docs: (usize, Option<u64>)) -> Backstage {
         Backstage {
+            instance: std::rc::Rc::new(()),
             page,
             docs,
             focus: None,
@@ -245,7 +248,7 @@ fn colours(t: &Tokens) -> (Color32, Color32) {
 
 /// Runs a side-menu action. Returns the page to show, or None to close the view (Some(current)
 /// leaves it as it is).
-fn act(app: &mut SlideApp, nav: Nav, current: Page) -> Option<Page> {
+fn act(app: &mut SlideApp, nav: Nav, current: Page, instance: std::rc::Rc<()>) -> Option<Page> {
     match nav {
         Nav::Page(p) => Some(p),
         Nav::Save => {
@@ -257,6 +260,7 @@ fn act(app: &mut SlideApp, nav: Nav, current: Page) -> Option<Page> {
                 return Some(Page::SaveAs);
             }
             app.save();
+            app.return_after_host_save(current, instance);
             let saved = app.session.active().is_some_and(|d| !d.is_dirty());
             if saved || web { None } else { Some(current) }
         }
@@ -304,7 +308,8 @@ pub fn key(app: &mut SlideApp, key: Key, mods: deckcraft_engine::Mods) -> bool {
         Key::Enter | Key::Space => {
             let Some(nav) = bs.focus.and_then(|i| all.get(i)).copied() else { return false };
             let current = bs.page;
-            match act(app, nav, current) {
+            let instance = bs.instance.clone();
+            match act(app, nav, current, instance) {
                 None => app.close_backstage(),
                 Some(p) => {
                     if let Some(bs) = app.backstage.as_mut() {
@@ -359,7 +364,7 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
             if nav_item(ui, *nav, &bs, index, &t).clicked() {
                 bs.focus = None;
                 commit_props(app, &bs);
-                match act(app, *nav, bs.page) {
+                match act(app, *nav, bs.page, bs.instance.clone()) {
                     None => out.close = true,
                     Some(p) => out.page = Some(p),
                 }
@@ -374,7 +379,7 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
                 if nav_item(ui, *nav, &bs, first_bottom + k, &t).clicked() {
                     bs.focus = None;
                     commit_props(app, &bs);
-                    match act(app, *nav, bs.page) {
+                    match act(app, *nav, bs.page, bs.instance.clone()) {
                         None => out.close = true,
                         Some(p) => out.page = Some(p),
                     }

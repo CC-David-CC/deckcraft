@@ -399,8 +399,17 @@ fn ctrl_w_asks_before_closing_unsaved_changes() {
 #[test]
 fn host_close_prompt_keeps_the_presentation_when_the_save_fails() {
     for fail in [true, false] {
+        let inbox: crate::Inbox = Default::default();
+        let replies = inbox.clone();
         let services = Services {
-            host_save: Some(Box::new(move |_: &str, _: &[u8], _: bool| if fail { Err("the page is gone".into()) } else { Ok(()) })),
+            inbox: Some(inbox),
+            host_save: Some(Box::new(move |_: &str, _: &[u8], _: bool, context: &crate::HostSaveContext| {
+                if fail {
+                    return Err("the page is gone".into());
+                }
+                replies.lock().unwrap().push(crate::InboxEvent::HostSaved { id: context.id.clone() });
+                Ok(())
+            })),
             download: Some(Box::new(|_: &str, _: &[u8]| {})),
             ..Default::default()
         };
@@ -430,9 +439,13 @@ fn host_close_prompt_keeps_the_presentation_when_the_save_fails() {
 fn host_save_as_under_the_same_name_returns_to_the_slide() {
     let got: Rc<RefCell<Vec<(String, bool)>>> = Default::default();
     let saves = got.clone();
+    let inbox: crate::Inbox = Default::default();
+    let replies = inbox.clone();
     let services = Services {
-        host_save: Some(Box::new(move |name: &str, _: &[u8], save_as: bool| {
+        inbox: Some(inbox),
+        host_save: Some(Box::new(move |name: &str, _: &[u8], save_as: bool, context: &crate::HostSaveContext| {
             saves.borrow_mut().push((name.to_string(), save_as));
+            replies.lock().unwrap().push(crate::InboxEvent::HostSaved { id: context.id.clone() });
             Ok(())
         })),
         download: Some(Box::new(|_: &str, _: &[u8]| {})),

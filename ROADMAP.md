@@ -453,3 +453,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 | 2026-10-10 | minor | Stage checked against the new core-workflow gate: passes, stays alpha |
 | 2026-10-10 | major | Restructured: stage, two numbers, dimensions, features, languages; parity estimate moved to docs/target-app-parity.md, "Working today" to its evidence section, the alpha checklist to docs/roadmap.md |
 | 2026-10-07 | major | Alpha checklist (~80% to a self-defined alpha), breadth ~80%, overall ~62%, ~190 h to full parity |
+
+## WebOS fork progress
+
+- 2026-11-15: hosted document saves wait for correlated confirmation; saved snapshots and close intent follow document identity, and File-view completion follows its view lifetime. See [host saves](webos/HOST-SAVES.md). Desktop/account integration remains unqualified.

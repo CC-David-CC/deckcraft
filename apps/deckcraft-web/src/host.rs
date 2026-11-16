@@ -15,8 +15,9 @@
 //!   as its file, so Save goes back to it; an outline (.txt, .md, .rtf), a file without a name and
 //!   a damaged file open untitled.
 //! - `deckcraft:save` (to the host): `{ name, saveAs, bytes }` (with the bytes as a transferred `ArrayBuffer` over `postMessage`) for
-//!   every file DeckCraft would otherwise download. The host stores it and reports failures
-//!   itself. `saveAs` says whether the file becomes the presentation's file:
+//!   every file DeckCraft would otherwise download. Document saves carry an `id`; the host
+//!   answers `deckcraft:saved { id }` only after durable storage. Until confirmation the
+//!   captured document remains unsaved. Exports remain copies. `saveAs` says whether the file becomes the presentation's file:
 //!   - Save: `false`. It writes the opened file under its own name and format (a .pptx stays a
 //!     .pptx), as the desktop app does. A name the parent never sent (an untitled presentation, an
 //!     outline, a file sent without a name, a repaired copy of a damaged file, a file the user
@@ -37,7 +38,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use craft_web_host::web::{FileData, Host, Message};
-use deckcraft_ui_egui::{Services, SlideApp};
+use deckcraft_ui_egui::{HostSaveContext, Inbox, InboxEvent, Services, SlideApp};
 
 /// The app id in the host messages (`deckcraft:ready`).
 const APP: &str = "deckcraft";
@@ -77,13 +78,17 @@ impl Bridge {
     /// Hand saved and exported files to the host instead of downloading them, and hear the files
     /// it sends.
     pub fn connect(&self, services: &mut Services, ctx: egui::Context) {
-        self.listen(ctx);
+        let inbox = services.inbox.clone().unwrap_or_default();
+        services.inbox = Some(inbox.clone());
+        self.listen(ctx, inbox);
         let bridge = self.clone();
-        services.host_save = Some(Box::new(move |name: &str, bytes: &[u8], save_as: bool| bridge.post_save(name, bytes, save_as)));
+        services.host_save = Some(Box::new(move |name: &str, bytes: &[u8], save_as: bool, context: &HostSaveContext| {
+            bridge.post_save(name, bytes, save_as, Some(&context.id))
+        }));
         // Exports and Print are copies.
         let bridge = self.clone();
         services.download = Some(Box::new(move |name: &str, bytes: &[u8]| {
-            if let Err(e) = bridge.post_save(name, bytes, false) {
+            if let Err(e) = bridge.post_save(name, bytes, false, None) {
                 log::error!("couldn't hand {name} to the page: {e}");
             }
         }));
@@ -120,17 +125,28 @@ impl Bridge {
         self.host.post_dirty(app.session.documents().iter().any(|d| d.is_dirty()));
     }
 
-    fn post_save(&self, path: &str, bytes: &[u8], save_as: bool) -> Result<(), String> {
+    fn post_save(&self, path: &str, bytes: &[u8], save_as: bool, id: Option<&str>) -> Result<(), String> {
         let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| path.to_string());
-        self.host.post_save(&name, bytes, None, save_as)
+        self.host.post_save(&name, bytes, id, save_as)
     }
 
     /// Hear `deckcraft:open` and queue the file for the next frame.
-    fn listen(&self, ctx: egui::Context) {
+    fn listen(&self, ctx: egui::Context, inbox: Inbox) {
         let opened = self.opened.clone();
         let host = self.host.clone();
         self.host.listen(move |message| {
-            let Message::Open { name, data } = message else { return };
+            let (name, data) = match message {
+                Message::Saved { id } => {
+                    match inbox.lock() {
+                        Ok(mut events) => events.push(InboxEvent::HostSaved { id }),
+                        Err(poisoned) => poisoned.into_inner().push(InboxEvent::HostSaved { id }),
+                    }
+                    ctx.request_repaint();
+                    return;
+                }
+                Message::Open { name, data } => (name, data),
+                _ => return,
+            };
             if data.size() >= MAX_OPEN_BYTES {
                 log::warn!("host file {name} is 2 GiB or larger; not opened");
                 let _ = host.post_failed(&format!("{name} is 2 GiB or larger, which DeckCraft's web build cannot open"), None);

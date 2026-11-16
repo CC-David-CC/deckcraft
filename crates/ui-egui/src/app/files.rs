@@ -503,35 +503,117 @@ impl SlideApp {
         }
     }
 
-    /// Saves to the page that keeps the files ([`Services::host_save`](crate::Services::host_save)).
-    /// Save (`ext` `None`) writes the presentation's own file (the one the page sent, or the
-    /// last one saved there) in that file's format, as the desktop app does; a presentation with
-    /// no file of its own is a new `.deckcraft` file, the name Save suggests on the desktop. Save
-    /// As (`pptx`, `deckcraft`) is a new file named after the presentation. Once the page has the
-    /// bytes, the presentation is saved and that name is its file. Returns the name, or why it
-    /// wasn't saved (also shown in the status bar).
-    pub(super) fn save_to_host(&mut self, ext: Option<&str>) -> Result<String, String> {
-        use deckcraft_engine::cmd::file::{format_for_path, mark_saved, save_bytes};
-        let Some(d) = self.session.active() else { return Err("no presentation is open".into()) };
-        let own = d.path.as_deref().and_then(|p| std::path::Path::new(p).file_name()).map(|n| n.to_string_lossy().to_string());
-        let (name, save_as) = match (ext, own) {
-            (None, Some(own)) => (own, false),
-            (ext, _) => (format!("{}.{}", d.title(), ext.unwrap_or("deckcraft")), true),
-        };
-        let saved = save_bytes(&d.doc, format_for_path(&name)).map_err(|e| e.to_string()).and_then(|bytes| {
-            let host = self.services.host_save.as_mut().ok_or("no page to save to")?;
-            host(&name, &bytes, save_as).map_err(|e| format!("Couldn't save {name}: {e}"))?;
-            mark_saved(&mut self.session, Some(name.clone())).map_err(|e| e.to_string())
-        });
-        match saved {
-            Ok(()) => {
-                self.set_status(format!("Saved {name}"));
-                Ok(name)
+    /// Dispatch a captured document version; only a correlated acknowledgement confirms it.
+    pub(super) fn save_to_host(&mut self, ext: Option<&str>) -> Result<Value, String> {
+        use deckcraft_engine::cmd::file::{capture_save, format_for_path, save_bytes};
+        let result = (|| {
+            let snapshot = capture_save(&self.session).map_err(|e| e.to_string())?;
+            if self.pending_host_saves.len() >= 8 || self.pending_host_saves.values().any(|p| p.snapshot.document_id() == snapshot.document_id()) {
+                return Err("A save is already pending; wait for its confirmation before saving again".to_string());
             }
-            Err(e) => {
-                self.set_status(e.clone());
-                Err(e)
+            let d = self.session.doc().map_err(|e| e.to_string())?;
+            let own = d.path.as_deref().and_then(|p| std::path::Path::new(p).file_name()).map(|n| n.to_string_lossy().to_string());
+            let (name, save_as) = match (ext, own) {
+                (None, Some(own)) => (own, false),
+                (ext, _) => (format!("{}.{}", d.title(), ext.unwrap_or("deckcraft")), true),
+            };
+            let bytes = save_bytes(&d.doc, format_for_path(&name)).map_err(|e| e.to_string())?;
+            let sequence = self.next_host_save;
+            self.next_host_save = sequence.checked_add(1).ok_or("Save identity exhausted")?;
+            let id = format!("deckcraft-save-{}-{sequence}", snapshot.document_id());
+            let context = crate::HostSaveContext { id: id.clone(), document: snapshot.document_id(), revision: snapshot.revision() };
+            self.pending_host_saves.insert(
+                id.clone(),
+                crate::PendingHostSave {
+                    snapshot,
+                    name: name.clone(),
+                    started: web_time::Instant::now(),
+                    uncertain: false,
+                    close_after: false,
+                    backstage: self.backstage.as_ref().map(|page| (page.page, page.instance.clone())),
+                },
+            );
+            let sent = self
+                .services
+                .host_save
+                .as_mut()
+                .ok_or_else(|| "no page to save to".to_string())
+                .and_then(|host| host(&name, &bytes, save_as, &context));
+            if let Err(error) = sent {
+                self.pending_host_saves.remove(&id);
+                return Err(format!("Couldn't save {name}: {error}"));
             }
+            self.set_status(format!("Saving {name}; awaiting confirmation"));
+            Ok(json!({"pending": "save", "id": id, "documentId": context.document.to_string(), "revision": context.revision.to_string()}))
+        })();
+        if let Err(error) = &result {
+            self.set_status(error.clone());
+        }
+        result
+    }
+
+    fn settle_host_save(&mut self, id: &str, error: Option<(String, bool)>) {
+        if let Some((error, true)) = &error {
+            if let Some(pending) = self.pending_host_saves.get_mut(id) {
+                pending.uncertain = true;
+                let name = pending.name.clone();
+                self.set_status(format!("Save outcome unknown for {name}: {}", error.chars().take(1024).collect::<String>()));
+            }
+            return;
+        }
+        let Some(pending) = self.pending_host_saves.remove(id) else { return };
+        if let Some((error, _)) = error {
+            self.set_status(format!("Save unconfirmed for {}: {}", pending.name, error.chars().take(1024).collect::<String>()));
+            return;
+        }
+        match deckcraft_engine::cmd::file::confirm_saved(&mut self.session, &pending.snapshot, pending.name.clone()) {
+            Ok(true) => {
+                self.set_status(format!("Saved {}", pending.name));
+                let uid = pending.snapshot.document_id();
+                let clean = self.session.documents().iter().any(|doc| doc.uid == uid && !doc.is_dirty());
+                if clean && pending.close_after {
+                    let _ = self.run("file.close", json!({"documentId": uid.to_string()}));
+                } else if clean
+                    && self.session.active().is_some_and(|doc| doc.uid == uid)
+                    && self
+                        .backstage
+                        .as_ref()
+                        .zip(pending.backstage.as_ref())
+                        .is_some_and(|(current, (page, instance))| current.page == *page && std::rc::Rc::ptr_eq(&current.instance, instance))
+                {
+                    self.backstage = None;
+                }
+            }
+            Ok(false) => {}
+            Err(error) => self.set_status(format!("Save confirmation could not be applied: {error}")),
+        }
+    }
+
+    /// The return-to-editor intent belongs to this exact lifetime of the File view.
+    pub(crate) fn return_after_host_save(&mut self, page: crate::backstage::Page, instance: std::rc::Rc<()>) {
+        let Some(uid) = self.session.active().map(|doc| doc.uid) else { return };
+        if let Some(save) = self.pending_host_saves.values_mut().find(|save| save.snapshot.document_id() == uid) {
+            save.backstage = Some((page, instance));
+        }
+    }
+
+    /// The Close prompt's Save intent belongs to its captured document.
+    pub(crate) fn close_after_host_save(&mut self) {
+        let Some(uid) = self.session.active().map(|doc| doc.uid) else { return };
+        if let Some(save) = self.pending_host_saves.values_mut().find(|save| save.snapshot.document_id() == uid) {
+            save.close_after = true;
+        }
+    }
+
+    pub(crate) fn expire_host_saves(&mut self) {
+        let expired: Vec<String> = self
+            .pending_host_saves
+            .iter()
+            .filter(|(_, save)| !save.uncertain && save.started.elapsed().as_secs() >= 120)
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in expired {
+            self.settle_host_save(&id, Some(("Confirmation timed out; the file may have been saved. Check it before retrying".into(), true)));
         }
     }
 
@@ -618,6 +700,8 @@ impl SlideApp {
         };
         for event in events {
             match event {
+                InboxEvent::HostSaved { id } => self.settle_host_save(&id, None),
+                InboxEvent::HostSaveFailed { id, error, uncertain } => self.settle_host_save(&id, Some((error, uncertain))),
                 InboxEvent::Cancelled { id } => self.pending_files.retain(|r| r.id != id),
                 InboxEvent::File(file) => self.apply_external_file(file.id, &file.name, &file.bytes),
             }

@@ -57,7 +57,7 @@ pub fn specs() -> Vec<CommandSpec> {
             has_doc,
             color_at
         ),
-        cmd!(noundo "file.close", "Close", ["File"], Some("Cmd+W"), "{}", has_doc, close),
+        cmd!(noundo "file.close", "Close", ["File"], Some("Cmd+W"), "{documentId?: decimal uid string}", has_doc, close),
         cmd!(
             "file.properties",
             "Properties",
@@ -477,9 +477,55 @@ pub fn format_for_path(path: &str) -> &'static str {
     }
 }
 
+/// The immutable presentation version handed to an asynchronous file writer.
+/// Keeping its Arc does not create a second editable document. Later edits use a new Arc,
+/// so confirming this version cannot accidentally mark those edits saved.
+#[derive(Clone, Debug)]
+pub struct SaveSnapshot {
+    uid: u64,
+    revision: u64,
+    doc: Arc<Presentation>,
+    source_path: Option<String>,
+}
+
+impl SaveSnapshot {
+    pub fn document_id(&self) -> u64 {
+        self.uid
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+}
+
+/// Capture the exact live version before serialization or dispatch to a host.
+pub fn capture_save(s: &Session) -> Result<SaveSnapshot> {
+    let st = s.doc()?;
+    Ok(SaveSnapshot { uid: st.uid, revision: st.revision, doc: st.doc.clone(), source_path: st.path.clone() })
+}
+
+/// Confirm a captured version in its originating document, without changing the active view.
+/// A closed document is ignored. A changed source identity is not silently overwritten.
+/// Newer edits remain dirty against the acknowledged snapshot and retain recovery data.
+pub fn confirm_saved(s: &mut Session, snapshot: &SaveSnapshot, path: String) -> Result<bool> {
+    let Some(st) = s.docs.iter_mut().find(|d| d.uid == snapshot.uid) else { return Ok(false) };
+    if st.path != snapshot.source_path {
+        return Err(EngineError::Other("The document's source changed while its save was pending".into()));
+    }
+    let revision = st.revision.checked_add(1).ok_or_else(|| EngineError::Other("Document revision exhausted".into()))?;
+    st.saved_doc = snapshot.doc.clone();
+    st.path = Some(path);
+    st.revision = revision;
+    let clean = !st.is_dirty();
+    if clean && let Some(dir) = &s.recovery_dir {
+        crate::recovery::discard(dir, snapshot.uid);
+    }
+    Ok(true)
+}
+
 /// The active presentation is saved as it is now: no unsaved changes, and `path` (when given)
-/// becomes its file. `file.save` calls it after writing; the web host bridge calls it once the
-/// page has the bytes.
+/// becomes its file. Synchronous writers call it after writing. Asynchronous hosts use
+/// `capture_save` and `confirm_saved` to confirm the exact dispatched version.
 pub fn mark_saved(s: &mut Session, path: Option<String>) -> Result<()> {
     let st = s.doc_mut()?;
     st.saved_doc = st.doc.clone();
@@ -685,8 +731,18 @@ fn info(s: &mut Session, _p: &Value) -> Result<Value> {
     }))
 }
 
-fn close(s: &mut Session, _p: &Value) -> Result<Value> {
-    if let Some(i) = s.active_index() {
+fn close(s: &mut Session, p: &Value) -> Result<Value> {
+    let index = match p.get("documentId") {
+        Some(value) => {
+            let uid = value
+                .as_str()
+                .and_then(|text| text.parse::<u64>().ok())
+                .ok_or_else(|| bad("file.close", "documentId must be a decimal uid string"))?;
+            Some(s.docs.iter().position(|d| d.uid == uid).ok_or_else(|| bad("file.close", "The target document is closed"))?)
+        }
+        None => s.active_index(),
+    };
+    if let Some(i) = index {
         s.close_document(i);
     }
     ok()

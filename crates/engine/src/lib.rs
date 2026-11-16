@@ -615,7 +615,11 @@ impl Session {
             if let Some(dir) = &self.recovery_dir {
                 recovery::discard(dir, d.uid);
             }
-            self.active = if self.docs.is_empty() { None } else { Some(i.min(self.docs.len() - 1)) };
+            self.active = match self.active {
+                Some(active) if active != i => Some(if active > i { active - 1 } else { active }),
+                _ if self.docs.is_empty() => None,
+                _ => Some(i.min(self.docs.len() - 1)),
+            };
         }
         self.forget_vertex_kind_unless(was);
     }
@@ -915,3 +919,6 @@ mod soak_tests;
 mod tests;
 #[cfg(test)]
 mod tests_keys;
+
+#[cfg(test)]
+mod host_save_tests;

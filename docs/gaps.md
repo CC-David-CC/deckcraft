@@ -451,3 +451,7 @@ Detail in [localization-parity.md](localization-parity.md).
 | 2026-10-11 | minor | Animated GIF export landed (#171); the entry now covers video export and animating transitions in the GIF |
 | 2026-10-10 | minor | Noted that no gap blocks alpha (core-workflow gate passes) |
 | 2026-10-10 | major | Created: every gap from the 2026-10-10 re-measure and the 16 open GitHub issues, ranked, with beta blockers marked |
+
+## WebOS hosted persistence integration
+
+The fork waits for document-save acknowledgement and retains later edits and uncertain outcomes. Immediate web negative/uncertain replies, export completion, account resource/revision authority, Desktop disposal and scoped agent integration remain open. See [host-save contract](../webos/HOST-SAVES.md); protocol acknowledgements alone are not account persistence proof.

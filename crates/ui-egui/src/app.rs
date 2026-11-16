@@ -108,6 +108,8 @@ impl SlideApp {
             next_file_id: 1,
             pending_files: Vec::new(),
             host_start: None,
+            next_host_save: 1,
+            pending_host_saves: HashMap::new(),
             ime_tracker: egui::ime_context::ImeContextTracker::new(),
             ime_pending: None,
             ime_frame_viewport: None,
@@ -235,6 +237,10 @@ impl SlideApp {
             // Inbox results are host file bytes and do not need fonts or a painted frame. A
             // window that starts hidden must still apply a file picked before its first UI pass.
             self.drain_inbox();
+            self.expire_host_saves();
+            if self.pending_host_saves.values().any(|save| !save.uncertain) {
+                ctx.request_repaint_after(std::time::Duration::from_secs(1));
+            }
         }
         self.drain_screenshots();
         // `raw_input_hook` ran before this logic pass. This is normally a no-op now that

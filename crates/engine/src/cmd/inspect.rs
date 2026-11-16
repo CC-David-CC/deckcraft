@@ -32,6 +32,8 @@ fn document(s: &mut Session, _p: &Value) -> Result<Value> {
         .collect();
     let m = d.masters.first();
     Ok(json!({
+        "documentId": st.uid.to_string(),
+        "revision": st.revision.to_string(),
         "title": st.title(),
         "path": st.path,
         "dirty": st.is_dirty(),
