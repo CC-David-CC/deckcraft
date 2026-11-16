@@ -74,3 +74,13 @@ server SHA. Neither this response nor sourceRetained grants access. Exports and
 real Desktop/UserFiles/agent integration remain open.
 
 Revision: WEBOS-74 — correlated binary adoption and stable operation outcomes.
+
+## Account view qualification
+
+The independent WebOS view now uses this protocol with Storage-owned account files.
+See [account file bindings](ACCOUNT-FILES.md) for actual signed-account/browser
+evidence, startup-save admission and remaining Desktop/export/agent gates.
+Parent desktop enabling and deployment are separate; standalone protocol tests
+remain distinct from those account tests.
+
+Revision: WEBOS-77 — explicit human account-view adapter.

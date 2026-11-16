@@ -473,3 +473,5 @@ app's JSON control channel (`deckcraft --control PORT`).
 ## WebOS fork progress
 
 - 2026-11-15: hosted document saves wait for correlated confirmation; saved snapshots and close intent follow document identity, and File-view completion follows its view lifetime. See [host saves](webos/HOST-SAVES.md). Desktop/account integration remains unqualified.
+
+- 2026-11-16 (WEBOS-77): synchronous WebOS account view and correlated Storage bindings pass isolated real signed-account browser save/reopen, second-context retrieval, conflict/isolation/logout checks; startup saves are gated before writes and an owned external bootstrap preserves CSP. Parent Desktop/Files enabling, exports, delegated agents and second-machine acceptance remain open; no parity score change. See [account bindings](webos/ACCOUNT-FILES.md).
