@@ -36,8 +36,9 @@ export function createFileSession({instanceId, sessionId, files, authorize, sign
     if (outcome.sourceRetained) bindings.set(outcome.documentId, Object.freeze({path, sha256}));
     return Object.freeze({documentId: outcome.documentId, revision: outcome.revision, resourceId: resourceOf(outcome.documentId), sourceRetained: outcome.sourceRetained});
   }
-  async function save(message, authority) {
+  async function save(message, authority, selectedPath = null, adoptSaved = null) {
     check();
+    requireThat(adoptSaved===null||typeof adoptSaved==='function','Native save adoption callback required.');
     const {id, documentId, revision, name, operation, documentSave, saveAs} = message || {};
     requireThat(opaque(id) && opaque(documentId) && opaque(revision) && nameValid(name) && documentSave === true && typeof saveAs === 'boolean' && operation === (saveAs ? 'file.saveAs' : 'file.save'), 'An identified native document save is required; exports are separate.');
     requireThat(message.bytes instanceof ArrayBuffer && message.bytes.byteLength <= MAX_FILE, 'Invalid document bytes.');
@@ -47,8 +48,10 @@ export function createFileSession({instanceId, sessionId, files, authorize, sign
     requireThat(!original || saveAs || original.path.split('/').at(-1) === name, 'Save name differs from the account source; use Save As.');
     const sameSource = !saveAs && original && original.path.split('/').at(-1) === name;
     const parent = original ? original.path.split('/').slice(0, -1).join('/') : directory;
-    const destination = sameSource ? original.path : (parent ? parent + '/' : '') + name;
-    const expected = sameSource ? original.sha256 : null;
+    const destination = selectedPath === null ? (sameSource ? original.path : (parent ? parent + '/' : '') + name) : selectedPath;
+    requireThat(pathValid(destination), 'Invalid account destination.');
+    requireThat(saveAs || !original || destination === original.path, 'Save destination requires Save As.');
+    const expected = original && destination === original.path ? original.sha256 : null;
     const intent = {id, documentId, revision, path: destination, state: 'authorizing'};
     pending.set(documentId, intent);
     let dispatched = false, writeReturned = false;
@@ -60,9 +63,14 @@ export function createFileSession({instanceId, sessionId, files, authorize, sign
       writeReturned = true;
       check();
       requireThat(SHA.test(saved?.sha256 || ''), 'Invalid durable server confirmation.');
+      const receipt=Object.freeze({id,documentId,revision,path:destination,sha256:saved.sha256,committed:true});
+      // The embedding keeps the old document binding until the native engine
+      // adopts this exact receipt. A lost acknowledgement is still uncertain,
+      // even though Storage returned success, and must retain the save guard.
+      if(adoptSaved){intent.state='adopting';await adoptSaved(receipt);check();}
       bindings.set(documentId, Object.freeze({path: destination, sha256: saved.sha256}));
       pending.delete(documentId);
-      return Object.freeze({id, documentId, revision, path: destination, sha256: saved.sha256, committed: true});
+      return receipt;
     } catch (error) {
       // Storage identifies dispatch uncertainty. A late/invalid confirmation also cannot prove failure.
       const unknown = error.outcome === 'unknown' || (dispatched && (disposed || signal?.aborted || writeReturned));
@@ -73,6 +81,12 @@ export function createFileSession({instanceId, sessionId, files, authorize, sign
   }
   return Object.freeze({
     open, save,
+    async bind(documentId, resource, authority) {
+      check(); requireThat(opaque(documentId) && pathValid(resource?.path) && SHA.test(resource?.sha256 || ''), 'Exact recovered account binding required.');
+      const path=resource.path, sha256=resource.sha256;
+      await allowed(authority,{documentId,operation:'file.recover',resourceId:path,expectedRevision:sha256});
+      bindings.set(documentId, Object.freeze({path,sha256}));
+    },
     inspect() { return {instanceId, sessionId, disposed, bindings: [...bindings].map(([documentId, binding]) => ({documentId, ...binding})), pending: [...pending.values()].map(value => ({...value}))}; },
     dispose() { disposed = true; bindings.clear(); },
   });

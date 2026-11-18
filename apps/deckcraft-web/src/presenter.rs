@@ -42,6 +42,7 @@ pub struct BrowserHost {
     state: Rc<RefCell<State>>,
     origin: String,
     listener: Closure<dyn FnMut(web_sys::MessageEvent)>,
+    pagehide: Closure<dyn FnMut(web_sys::Event)>,
     button: Option<(web_sys::HtmlElement, Closure<dyn FnMut(web_sys::Event)>)>,
     images: DeltaCache,
 }
@@ -79,7 +80,22 @@ impl BrowserHost {
             ctx.request_repaint();
         });
         window.add_event_listener_with_callback("message", listener.as_ref().unchecked_ref()).map_err(error)?;
-        Ok(Self { state, origin, listener, button: None, images: DeltaCache::default() })
+        // Removing an iframe does not guarantee Rust Drop runs. Close only
+        // this audience view's popup while its pagehide callback is still live.
+        let page_state = Rc::downgrade(&state);
+        let pagehide = Closure::new(move |_event: web_sys::Event| {
+            if let Some(state) = page_state.upgrade()
+                && let Ok(mut state) = state.try_borrow_mut()
+                && let Some(popup) = state.popup.take()
+            {
+                let _ = popup.close();
+            }
+        });
+        if let Err(value) = window.add_event_listener_with_callback("pagehide", pagehide.as_ref().unchecked_ref()) {
+            let _ = window.remove_event_listener_with_callback("message", listener.as_ref().unchecked_ref());
+            return Err(error(value));
+        }
+        Ok(Self { state, origin, listener, pagehide, button: None, images: DeltaCache::default() })
     }
     fn remove_button(&mut self) {
         if let Some((button, callback)) = self.button.take() {
@@ -200,6 +216,7 @@ impl Drop for BrowserHost {
         self.close();
         if let Some(window) = web_sys::window() {
             let _ = window.remove_event_listener_with_callback("message", self.listener.as_ref().unchecked_ref());
+            let _ = window.remove_event_listener_with_callback("pagehide", self.pagehide.as_ref().unchecked_ref());
         }
     }
 }

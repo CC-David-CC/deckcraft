@@ -18,6 +18,30 @@ impl SlideApp {
     /// Run a command by id (UI commands here, everything else in the engine). Errors show in the
     /// status bar and are returned.
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
+        if id.starts_with("host.") {
+            return self.host_command(id, &params);
+        }
+        if self.host_pause.is_some() {
+            return Err("The document is paused for session finalization".into());
+        }
+        if self.host_documents {
+            let request = match id {
+                "file.new" => Some("file.new"),
+                "file.open" | "app.openDialog" => Some("file.open"),
+                "file.close" | "app.quit" => Some("file.close"),
+                "app.saveAsDialog" => Some("file.saveAs"),
+                _ => None,
+            };
+            if let Some(command) = request {
+                return self.request_host_document(command, params);
+            }
+            if id == "view.newWindow" {
+                return Err("Desktop owns document windows".into());
+            }
+            if id.starts_with("file.recovery.") || matches!(id, "file.openBytes" | "file.adopt" | "file.saveAs") {
+                return Err("Use the document host for file adoption and Save As".into());
+            }
+        }
         let r = if UI_COMMANDS.iter().any(|c| c.0 == id) {
             self.run_ui(id, &params)
         } else if id == "file.save" && self.services.host_save.is_some() && params.get("path").is_none() {

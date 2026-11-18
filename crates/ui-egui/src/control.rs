@@ -89,6 +89,11 @@ pub fn all_commands(app: &SlideApp) -> Value {
 pub fn inspect(app: &SlideApp, ctx: &egui::Context) -> Value {
     let r = ctx.content_rect();
     json!({
+        "hostDocumentVersion": 1,
+        "hostOwnsDocuments": app.host_documents,
+        "hostPaused": app.host_pause.is_some(),
+        "autosaveEligible": app.host_autosave_eligible(),
+        "pendingNotes": app.notes_fingerprint(),
         "documentTargeting": "active-precondition-v1",
         "documentId": app.session.active().map(|d| d.uid.to_string()),
         "revision": app.session.active().map(|d| d.revision.to_string()),
@@ -110,7 +115,7 @@ pub fn inspect(app: &SlideApp, ctx: &egui::Context) -> Value {
             s.showing_value(n, aspect, ctx.content_rect(), now)
         }),
         "animPreview": app.anim_preview_report().map(|(slide, time, duration)| json!({"slide": slide, "time": time, "duration": duration})),
-        "documents": app.session.documents().iter().map(|d| json!({"documentId": d.uid.to_string(), "revision": d.revision.to_string(), "title": d.title(), "dirty": d.is_dirty(), "path": d.path})).collect::<Vec<_>>(),
+        "documents": app.session.documents().iter().map(|d| json!({"documentId": d.uid.to_string(), "revision": d.revision.to_string(), "title": d.title(), "dirty": d.is_dirty() || (app.notes_buf.0 == d.uid && app.notes_buf.2.edited), "path": d.path})).collect::<Vec<_>>(),
         "pendingSaves": app.pending_host_saves.iter().map(|(id, save)| (id, json!({
             "documentId": save.snapshot.document_id().to_string(),
             "revision": save.snapshot.revision().to_string(),
@@ -165,6 +170,12 @@ pub fn handle(app: &mut SlideApp, ctx: &egui::Context, req: &ControlRequest) -> 
     let p = &req.params;
     if let Err(error) = check_document_target(app, p) {
         return err(error);
+    }
+    if app.host_pause.is_some()
+        && !matches!(req.method.as_str(), "ui.inspect" | "document.inspect" | "engine.commands")
+        && !(req.method == "engine.execute" && p.get("command").and_then(Value::as_str).is_some_and(|id| id.starts_with("host.")))
+    {
+        return err("The document is paused for session finalization");
     }
     let s = |k: &str| p.get(k).and_then(Value::as_str);
     match req.method.as_str() {

@@ -57,7 +57,11 @@ fn new_tiles(app: &mut SlideApp, ui: &mut Ui, query: &str, limit: usize, blank: 
         if sample && shown < limit {
             let th = deckcraft_model::theme::builtin_themes().into_iter().find(|t| t.name == "DeckCraft");
             if tile(ui, "Sample deck: Northern Lights", th.as_ref(), false).clicked()
-                && let Err(e) = deckcraft_engine::sample::open_sample(&mut app.session)
+                && let Err(e) = if app.host_documents {
+                    app.request_host_document("file.new", json!({"sample": true})).map(|_| ())
+                } else {
+                    deckcraft_engine::sample::open_sample(&mut app.session).map_err(|e| e.to_string())
+                }
             {
                 app.set_status(e.to_string());
             }
@@ -292,7 +296,7 @@ pub(super) fn open_page(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
             if place_row(ui, Icon::OpenFolder, "Browse", false, 220.0).on_hover_text("Open a presentation from a folder (Ctrl+O)").clicked() {
                 let _ = app.run("app.openDialog", json!({}));
             }
-            if app.session.recovery_dir.is_some() {
+            if !app.host_documents && app.session.recovery_dir.is_some() {
                 ui.add_space(24.0);
                 if ui.button("Recover Unsaved Presentations").clicked() {
                     match app.run("file.recovery.open", json!({})) {

@@ -925,9 +925,9 @@ SFX D Y 1\nSFX D 0 ed/S .\n";
     fn suggestions_come_from_edits_and_replacements() {
         let d = d();
         assert_eq!(d.suggest("sldie", 3).first().map(String::as_str), Some("slide"));
-        assert!(d.suggest("foto", 5).contains(&"photo".to_string()));
-        assert!(d.suggest("Slidse", 5).contains(&"Slides".to_string()));
-        assert!(d.suggest("workingslides", 5).contains(&"working slides".to_string()));
+        assert!(d.suggest("foto", 5).iter().any(|value| value == "photo"));
+        assert!(d.suggest("Slidse", 5).iter().any(|value| value == "Slides"));
+        assert!(d.suggest("workingslides", 5).iter().any(|value| value == "working slides"));
     }
 
     /// An affix header can claim billions of records; parsing stops where the file does.
@@ -955,9 +955,9 @@ SFX D Y 1\nSFX D 0 ed/S .\n";
     #[test]
     fn all_caps_words_get_uppercase_suggestions() {
         let d = d();
-        assert!(d.suggest("SLDE", 5).contains(&"SLIDE".to_string()));
-        assert!(d.suggest("FOTO", 5).contains(&"PHOTO".to_string()));
-        assert!(d.suggest("NSSA", 5).contains(&"NASA".to_string()));
+        assert!(d.suggest("SLDE", 5).iter().any(|value| value == "SLIDE"));
+        assert!(d.suggest("FOTO", 5).iter().any(|value| value == "PHOTO"));
+        assert!(d.suggest("NSSA", 5).iter().any(|value| value == "NASA"));
     }
 
     #[test]

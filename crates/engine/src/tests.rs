@@ -1337,7 +1337,7 @@ fn layout_change_keeps_text() {
     s.execute("slide.layout", &json!({"layout": "twoContent"})).unwrap();
     let v = s.execute("slide.inspect", &json!({})).unwrap();
     let texts: Vec<String> = v["shapes"].as_array().unwrap().iter().filter_map(|x| x["text"].as_str().map(String::from)).collect();
-    assert!(texts.contains(&"T".to_string()) && texts.contains(&"B".to_string()), "{v}");
+    assert!(texts.iter().any(|value| value == "T") && texts.iter().any(|value| value == "B"), "{v}");
     assert_eq!(v["layout"], "Two Content");
 }
 

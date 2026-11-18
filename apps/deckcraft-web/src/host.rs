@@ -88,6 +88,16 @@ impl Bridge {
         let inbox = services.inbox.clone().unwrap_or_default();
         services.inbox = Some(inbox.clone());
         self.listen(ctx, inbox);
+        services.host_request = Some(Box::new(move |command, params, uid, revision| {
+            let value = serde_json::json!({"type": "deckcraft:document-request", "command": command, "params": params, "documentId": uid.to_string(), "revision": revision.to_string()});
+            if let Some(window) = web_sys::window()
+                && let Ok(Some(parent)) = window.parent()
+                && let Ok(origin) = window.location().origin()
+                && let Ok(value) = js_sys::JSON::parse(&value.to_string())
+            {
+                let _ = parent.post_message(&value, &origin);
+            }
+        }));
         let bridge = self.clone();
         services.host_save = Some(Box::new(move |name: &str, bytes: &[u8], save_as: bool, context: &HostSaveContext| {
             let document_id = context.document.to_string();

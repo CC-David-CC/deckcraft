@@ -115,3 +115,40 @@ test('authority invalidation after a server reply cannot acknowledge a save to t
   assert.equal(session.inspect().bindings[0].sha256, sha);
   assert.equal(session.inspect().pending[0].state, 'unknown');
 });
+
+test('explicit Save As preserves a canonical nested destination and subsequent conditional writes', async () => {
+  const {session,calls}=fixture();await open(session);
+  const saved=await session.save(request({operation:'file.saveAs',saveAs:true,name:'New.pptx'}),human,'Talks/November/New.pptx');
+  assert.equal(saved.path,'Talks/November/New.pptx');assert.deepEqual(calls.at(-1),['write','Talks/November/New.pptx',[1,2,3],null]);
+  await session.save(request({id:'next',name:'New.pptx'}),human);assert.deepEqual(calls.at(-1),['write','Talks/November/New.pptx',[1,2,3],nextSha]);
+});
+test('explicit ordinary Save cannot be redirected while Save As collisions retain the old binding', async () => {
+  const {session,calls}=fixture({files:{async write(){const error=Error('collision');error.status=409;throw error;}}});await open(session);
+  await assert.rejects(session.save(request(),human,'Other/A.deckcraft'),/Save As/);
+  await assert.rejects(session.save(request({saveAs:true,operation:'file.saveAs'}),human,'Other/A.deckcraft'),/collision/);
+  assert.equal(session.inspect().bindings[0].path,'Folder/A.deckcraft');assert.equal(calls.filter(call=>call[0]==='write').length,0);
+});
+
+test('recovered binding requires explicit authorized authority and captures metadata before yielding', async () => {
+  const {session}=fixture();await assert.rejects(session.bind('doc-A',{path:'Talks/A.pptx',sha256:sha},agent),/denied/);
+  assert.equal(session.inspect().bindings.length,0);
+  const resource={path:'Talks/A.pptx',sha256:sha},binding=session.bind('doc-A',resource,human);resource.path='Other/B.pptx';await binding;
+  assert.equal(session.inspect().bindings[0].path,'Talks/A.pptx');
+});
+
+test('native adoption keeps the old binding and save guard until its exact server receipt is accepted',async()=>{
+  const {session}=fixture(),gate=deferred(),entered=deferred();await open(session);
+  const saving=session.save(request({saveAs:true,operation:'file.saveAs',name:'New.pptx'}),human,'Talks/New.pptx',async receipt=>{
+    assert.equal(Object.isFrozen(receipt),true);assert.equal(receipt.path,'Talks/New.pptx');assert.equal(receipt.sha256,nextSha);entered.resolve();await gate.promise;
+  });
+  await entered.promise;assert.equal(session.inspect().bindings[0].path,'Folder/A.deckcraft');assert.equal(session.inspect().pending[0].state,'adopting');
+  await assert.rejects(session.save(request({id:'other'}),human),/pending/);gate.resolve();await saving;
+  assert.equal(session.inspect().bindings[0].path,'Talks/New.pptx');assert.equal(session.inspect().pending.length,0);
+});
+
+test('lost native adoption after server confirmation is unknown and retains the prior binding',async()=>{
+  const {session}=fixture();await open(session);
+  await assert.rejects(session.save(request(),human,null,async()=>{throw Error('Native acknowledgement unavailable');}),error=>error.outcome==='unknown');
+  assert.equal(session.inspect().bindings[0].sha256,sha);assert.equal(session.inspect().pending[0].state,'unknown');
+  await assert.rejects(session.save(request({id:'other'}),human),/unknown/);
+});

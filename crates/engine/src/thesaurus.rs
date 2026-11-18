@@ -69,7 +69,7 @@ mod tests {
     fn senses_endings_and_case() {
         let g = lookup("goal");
         assert_eq!(g.len(), 1);
-        assert!(g[0].synonyms.contains(&"objective".to_string()));
+        assert!(g[0].synonyms.iter().any(|value| value == "objective"));
         assert_eq!(lookup("change").len(), 2, "verb and noun senses");
         assert_eq!(lookup("Goals")[0].synonyms[0], "Aim");
         assert_eq!(lookup("GOAL")[0].synonyms[0], "AIM");

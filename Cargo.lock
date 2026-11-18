@@ -980,6 +980,7 @@ dependencies = [
 [[package]]
 name = "craft-web-host"
 version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=94981849457596b032355f74144cdd91c04d5df5#94981849457596b032355f74144cdd91c04d5df5"
 dependencies = [
  "wasm-bindgen",
  "web-sys",

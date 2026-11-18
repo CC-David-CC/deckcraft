@@ -400,7 +400,7 @@ impl Prefs {
         self.grid_spacing =
             if self.grid_spacing.is_finite() && self.grid_spacing > 0.0 { self.grid_spacing.clamp(0.5, 1000.0) } else { d.grid_spacing };
         self.duplicate_offset = within(self.duplicate_offset, -1000.0, 1000.0, d.duplicate_offset);
-        self.undo_limit = self.undo_limit.min(MAX_UNDO_LIMIT);
+        self.undo_limit = self.undo_limit.clamp(1, MAX_UNDO_LIMIT);
         self.recovery_minutes = within(self.recovery_minutes, 0.1, 24.0 * 60.0, d.recovery_minutes);
         if self.author.chars().count() > 256 {
             self.author = self.author.chars().take(256).collect();

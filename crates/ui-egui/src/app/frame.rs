@@ -27,7 +27,7 @@ impl SlideApp {
 
     /// AutoRecover on a monotonic deadline, even when nothing is painted.
     pub(super) fn autosave_if_due(&mut self, ctx: &egui::Context) {
-        if self.session.recovery_dir.is_none() {
+        if self.host_documents || self.session.recovery_dir.is_none() {
             return;
         }
         let every = (self.session.prefs.recovery_minutes * 60.0).max(10.0);

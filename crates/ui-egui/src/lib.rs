@@ -50,6 +50,7 @@ pub use control::{ControlRequest, ControlResponse};
 
 mod app;
 mod clock;
+mod document_host;
 mod ime_hooks;
 pub mod panels;
 mod services;
@@ -350,6 +351,8 @@ pub struct SlideApp {
     /// The empty presentation host mode starts with ([`SlideApp::start_for_host`]), until the
     /// first file the page sends takes its place.
     host_start: Option<u64>,
+    host_documents: bool,
+    host_pause: Option<String>,
     next_host_save: u64,
     pending_host_saves: HashMap<String, PendingHostSave>,
     /// Owner/generation/cause bookkeeping for the canvas text IME producer.

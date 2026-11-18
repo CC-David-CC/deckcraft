@@ -167,6 +167,10 @@ impl SlideApp {
     /// File › Close and Ctrl+W: closes the active presentation, asking first when it has unsaved
     /// changes (Save, Don't Save, Cancel), as PowerPoint does.
     pub fn close_presentation(&mut self) {
+        if self.host_documents {
+            let _ = self.run("file.close", json!({}));
+            return;
+        }
         match self.session.active() {
             None => {}
             Some(d) if d.is_dirty() => self.dialog = Some(dialogs::Dialog::new("close")),
@@ -293,6 +297,10 @@ impl SlideApp {
     }
 
     pub(crate) fn pick_and_open(&mut self) {
+        if self.host_documents {
+            let _ = self.run("file.open", json!({}));
+            return;
+        }
         if let Some(pick) = self.services.pick_open.as_mut() {
             if let Some(path) = pick("open") {
                 self.open_path_in_background(&path);
@@ -306,6 +314,10 @@ impl SlideApp {
     }
 
     pub fn open_path(&mut self, path: &str) -> Result<(), String> {
+        if self.host_documents {
+            self.request_host_document("file.open", json!({"path": path}))?;
+            return Ok(());
+        }
         self.session.execute("file.open", &json!({"path": path})).map_err(|e| e.to_string())?;
         self.note_recent(path);
         Ok(())
@@ -448,6 +460,10 @@ impl SlideApp {
     }
 
     pub fn save_as_dialog(&mut self, format: &str) {
+        if self.host_documents {
+            let _ = self.request_host_document("file.saveAs", json!({"format": format}));
+            return;
+        }
         let name = self.session.active().map(|d| d.title()).unwrap_or_else(|| "Presentation".into());
         let ext = if format == "pptx" { "pptx" } else { "deckcraft" };
         let suggested = format!("{name}.{ext}");
@@ -505,8 +521,13 @@ impl SlideApp {
 
     /// Dispatch a captured document version; only a correlated acknowledgement confirms it.
     pub(super) fn save_to_host(&mut self, ext: Option<&str>) -> Result<Value, String> {
+        self.save_to_host_named(ext, None)
+    }
+
+    pub(crate) fn save_to_host_named(&mut self, ext: Option<&str>, destination: Option<&str>) -> Result<Value, String> {
         use deckcraft_engine::cmd::file::{capture_save, format_for_path, save_bytes};
         let result = (|| {
+            self.flush_host_notes()?;
             let snapshot = capture_save(&self.session).map_err(|e| e.to_string())?;
             if self.pending_host_saves.len() >= 8 || self.pending_host_saves.values().any(|p| p.snapshot.document_id() == snapshot.document_id()) {
                 return Err("A save is already pending; wait for its confirmation before saving again".to_string());
@@ -515,8 +536,9 @@ impl SlideApp {
             let own = d.path.as_deref().and_then(|p| std::path::Path::new(p).file_name()).map(|n| n.to_string_lossy().to_string());
             let (name, save_as) = match (ext, own) {
                 (None, Some(own)) => (own, false),
-                (ext, _) => (format!("{}.{}", d.title(), ext.unwrap_or("deckcraft")), true),
+                (ext, _) => (format!("{}.{}", d.title(), ext.unwrap_or(if self.host_documents { "pptx" } else { "deckcraft" })), true),
             };
+            let (name, save_as) = destination.map(|path| (path.to_string(), true)).unwrap_or((name, save_as));
             let bytes = save_bytes(&d.doc, format_for_path(&name)).map_err(|e| e.to_string())?;
             let sequence = self.next_host_save;
             self.next_host_save = sequence.checked_add(1).ok_or("Save identity exhausted")?;
@@ -552,7 +574,7 @@ impl SlideApp {
         result
     }
 
-    fn settle_host_save(&mut self, id: &str, error: Option<(String, bool)>) {
+    pub(crate) fn settle_host_save(&mut self, id: &str, error: Option<(String, bool)>) {
         if let Some((error, true)) = &error {
             if let Some(pending) = self.pending_host_saves.get_mut(id) {
                 pending.uncertain = true;
@@ -627,6 +649,14 @@ impl SlideApp {
     /// with ([`Self::start_for_host`]), if that one is still open, untitled and unchanged; later
     /// files open beside the others.
     pub fn open_from_host(&mut self, name: Option<&str>, bytes: &[u8]) -> Result<crate::HostOpenOutcome, String> {
+        if self.host_pause.is_some() {
+            return Err("The document is paused".into());
+        }
+        if self.host_documents
+            && (self.session.documents().len() != 1 || self.session.active().is_none_or(|d| Some(d.uid) != self.host_start || d.is_dirty()))
+        {
+            return Err("Desktop owns new presentation windows".into());
+        }
         let blank = self.host_start.filter(|&uid| self.session.documents().iter().any(|d| d.uid == uid && d.path.is_none() && !d.is_dirty()));
         let before = self.session.documents().len();
         let shown = name.unwrap_or("Presentation");
@@ -707,7 +737,11 @@ impl SlideApp {
         };
         for event in events {
             match event {
-                InboxEvent::HostSaved { id } => self.settle_host_save(&id, None),
+                InboxEvent::HostSaved { id } => {
+                    if !self.host_documents {
+                        self.settle_host_save(&id, None);
+                    }
+                }
                 InboxEvent::HostSaveFailed { id, error, uncertain } => self.settle_host_save(&id, Some((error, uncertain))),
                 InboxEvent::Cancelled { id } => self.pending_files.retain(|r| r.id != id),
                 InboxEvent::File(file) => self.apply_external_file(file.id, &file.name, &file.bytes),
@@ -792,6 +826,10 @@ impl SlideApp {
         } else {
             json!({"name": name, "data": deckcraft_engine::cmd::base64_encode(bytes)})
         };
+        if self.host_documents && cmd == "file.openBytes" {
+            let _ = self.request_host_document("file.import", json!({"name": name, "data": deckcraft_engine::cmd::base64_encode(bytes)}));
+            return;
+        }
         let result = if cmd == "file.openBytes" || self.viewing_target(&req.target) {
             self.session.execute(cmd, &params).map(|_| ()).map_err(|e| e.to_string())
         } else {

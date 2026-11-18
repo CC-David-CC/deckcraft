@@ -108,6 +108,8 @@ impl SlideApp {
             next_file_id: 1,
             pending_files: Vec::new(),
             host_start: None,
+            host_documents: false,
+            host_pause: None,
             next_host_save: 1,
             pending_host_saves: HashMap::new(),
             ime_tracker: egui::ime_context::ImeContextTracker::new(),
@@ -282,6 +284,9 @@ impl SlideApp {
         let ctx = ui.ctx().clone();
         if !Self::root_viewport_admitted(&ctx) {
             log::debug!("ignoring SlideApp::ui for render-only viewport {:?}", ctx.viewport_id());
+            return;
+        }
+        if self.host_pause.is_some() {
             return;
         }
         self.ui_inner(ui);

@@ -118,6 +118,9 @@ mod tests {
         assert_eq!(prefs.undo_limit, deckcraft_engine::MAX_UNDO_LIMIT);
         assert_eq!(prefs.recovery_minutes, 0.1);
         assert_eq!(prefs.author.chars().count(), 256);
+        // A damaged profile must not configure an unusable zero-step history.
+        std::fs::write(d.join(PREFS_FILE), r#"{"undoLimit":0}"#).unwrap();
+        assert_eq!(load(&d).1.unwrap().undo_limit, 1);
         // A zero or negative zoom means "fit".
         std::fs::write(d.join(UI_FILE), r#"{"zoom": 0}"#).unwrap();
         assert_eq!(load(&d).0.unwrap().zoom, None);

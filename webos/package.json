@@ -1,7 +1,5 @@
 {
-  "name": "@webos/deckcraft",
-  "version": "0.1.0",
-  "private": true,
-  "type": "module",
-  "exports": "./index.mjs"
+  "name": "@webos/deckcraft", "version": "0.1.0", "private": true, "type": "module",
+  "exports": {".": "./index.mjs", "./recovery": "./drafts.mjs"},
+  "dependencies": {"@webos/runtime": "0.1.0"}
 }
