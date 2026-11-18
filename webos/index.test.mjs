@@ -223,10 +223,12 @@ test('real Runtime AutoSave waits for finished native input, uses conditional Sa
 
 test('automatic retry is restricted to verified no-write429 responses',async()=>{
   for(const [message,expected] of [['Too many pending account-file operations; wait for the current operations to finish','retrying'],['Unexplained upstream429','paused']]){
-    const f=fixture({mount:{resource:{path:'Talks/Retry.pptx',sha256:SHA}},async write(){const error=Error(message);error.status=429;throw error;}});try{await f.view.ready;
+    const f=fixture({mount:{resource:{path:'Talks/Retry.pptx',sha256:SHA}},async write(){const error=Error(message);error.status=429;error.retryAfterMs=75_000;throw error;}});try{await f.view.ready;
       await f.view.execute({...f.target(),command:'slide.new'},human);f.state.autosaveEligible=true;await f.view.inspect();await sleep(10_100);
       await until(()=>f.calls.some(call=>call[0]==='write'));await until(()=>f.view.element.children[1].children[0].textContent.includes(expected==='retrying'?'retry':'paused'));
-      assert.equal((await f.view.inspect()).autosave.state,expected);assert.equal(f.calls.filter(call=>call[0]==='write').length,1);
+      const save=(await f.view.inspect()).autosave;
+      assert.equal(save.state,expected);assert.equal(f.calls.filter(call=>call[0]==='write').length,1);
+      if(expected==='retrying')assert(save.nextAt-performance.now()>70_000);
     }finally{f.view.dispose();}
   }
 });

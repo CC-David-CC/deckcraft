@@ -1,5 +1,5 @@
 /** Trusted same-origin document host; native Rust owns all editable presentation state. */
-import {createAccountAutosave} from '@webos/runtime/account-autosave';
+import {accountAutosaveRetry,createAccountAutosave} from '@webos/runtime/account-autosave';
 import {createFileSession} from './account-files.mjs';
 import {createDialogs, canonicalPath} from './dialogs.mjs';
 
@@ -54,7 +54,7 @@ export function mount({instanceId,sessionId,resource=null,imported=null,template
     try{const result=await hostCommand('host.autosave',{path:original.path,revision:version});
       if(result?.status)return result;if(result?.pending!=='save')throw Error('AutoSave did not prepare an identified native save.');
       await completion(result.id).promise;await inspectNative();return {status:'saved'};
-    }catch(error){if(error.outcome!=='unknown'&&error.status===429&&['Too many pending account-file operations; wait for the current operations to finish','Transfer allowance reached; try later'].includes(error.message))return {status:'retry',reason:error.message};
+    }catch(error){const retry=accountAutosaveRetry(error);if(retry)return retry;
       autosaveBlock={identity,reason:error.message};return {status:'paused',reason:error.message};
     }finally{autoPending=false;if(!disposed){changed();observeAutosave();}}
   }
