@@ -20,16 +20,17 @@ export function mount({instanceId,sessionId,resource=null,imported=null,template
   status.setAttribute('role','status');status.style.cssText='flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';statusBar.style.cssText='display:flex;align-items:center;gap:8px;flex:none';autoToggle.type='button';autoToggle.textContent='AutoSave: On';autoToggle.setAttribute('aria-pressed','true');autoToggle.title='Save finished edits to the current account file after a debounce. Browser recovery stays on.';statusBar.append(status,autoToggle);retryButton.textContent='Retry';retryButton.hidden=true;element.append(frame,statusBar,retryButton);
   const abort=new AbortController(),fileSession=createFileSession({instanceId,sessionId,files,authorize,signal:abort.signal}),startup=deferred(),opens=new Map(),completions=new Map(),destinations=new Map(),listeners=new Set(),bindingListeners=new Set(),nativeWaiters=new Set();
   let phase='loading',disposed=false,initializing=false,nativeReady=false,configured=false,loaded=false,native=null,currentDocument=null,fingerprint='',lifecycleRevision=0,closeIntent=null,paused=false,lease=null,timer,poll,checkpointTail=Promise.resolve(),needsCopy=false,recoveryState=recovery?'ready':'unavailable',nextOpen=1,saveChoosing=false,commandPending=0,preparedDestination=null,lastProfileText=null,autoPending=false,autosaveBlock=null,autosave=null,lastAutosaveState='idle',pauseToken=null,autosaveEnabled=true,nativeDocument=null,nativeInvalidated=false;
-  const check=()=>{if(disposed||abort.signal.aborted)throw new DOMException('DeckCraft view closed.','AbortError');files.check();
+  const checkFrame=()=>{if(disposed||abort.signal.aborted)throw new DOMException('DeckCraft view closed.','AbortError');
     if(nativeInvalidated||nativeDocument&&frame.contentDocument!==nativeDocument){if(!nativeInvalidated){nativeInvalidated=true;loaded=false;phase='unavailable';frame.inert=true;clearTimeout(timer);clearInterval(poll);retryButton.hidden=true;const error=Error('DeckCraft reloaded unexpectedly. Close and reopen this view to recover its last browser checkpoint.');status.textContent=error.message;status.title=error.message;autosave?.pause(error.message);startup.reject(error);for(const entry of opens.values()){clearTimeout(entry.timer);entry.reject(error);}opens.clear();for(const entry of completions.values())entry.reject(error);for(const reject of [...nativeWaiters])reject(error);changed();}throw Error('The original DeckCraft document instance is unavailable. Close and reopen this view.');}};
-  function nativeRequest(value,method,params){
-    check();return new Promise((resolve,reject)=>{
+  const check=()=>{checkFrame();files.check();};
+  function nativeRequest(value,method,params,assertCurrent=check){
+    assertCurrent();return new Promise((resolve,reject)=>{
       let settled=false;
       const finish=(error,result)=>{if(settled)return;settled=true;clearTimeout(timeout);abort.signal.removeEventListener('abort',cancel);nativeWaiters.delete(cancelNative);error?reject(error):resolve(result);};
       const cancelNative=error=>finish(error),cancel=()=>finish(new DOMException('DeckCraft view closed.','AbortError'));
       const timeout=setTimeout(()=>{const error=Error('Native DeckCraft request timed out. Verify pending account saves before retrying.');error.outcome='unknown';finish(error);},31000);
       nativeWaiters.add(cancelNative);abort.signal.addEventListener('abort',cancel,{once:true});
-      try{Promise.resolve(value.request(method,params)).then(result=>{try{check();finish(null,result);}catch(error){finish(error);}},error=>finish(error));}catch(error){finish(error);}
+      try{Promise.resolve(value.request(method,params)).then(result=>{try{assertCurrent();finish(null,result);}catch(error){finish(error);}},error=>finish(error));}catch(error){finish(error);}
     });
   }
   const api=()=>{check();const value=frame.contentWindow?.deckcraft;if(typeof value?.request!=='function')throw Error('DeckCraft command interface unavailable.');return {request:(method,params)=>nativeRequest(value,method,params)};};
@@ -165,7 +166,19 @@ export function mount({instanceId,sessionId,resource=null,imported=null,template
       let active=true;const release=()=>{if(!active)return;active=false;signal?.removeEventListener('abort',release);if(lease===release)lease=null;if(disposed)return;void hostCommand('host.pause',{paused:false,lease:token}).then(()=>{paused=false;pauseToken=null;frame.inert=false;schedule();},notify);};
       lease=release;signal?.addEventListener('abort',release,{once:true});if(signal?.aborted){release();throw Error('DeckCraft pause cancelled.');}return Object.freeze({release});},
     async commitClose(){if(disposed||nativeInvalidated)return true;if(pending())throw Error('Wait for pending operations before closing.');clearTimeout(timer);await checkpointTail.catch(()=>{});let own;
-      try{if(loaded&&!paused)own=await lifecycle.quiesce();await inspectNative();if(loaded&&dirty()&&closeIntent!==fingerprint)throw Error('DeckCraft changed after close confirmation.');if(loaded){await hostCommand('host.finalizeClose',{lease:pauseToken});await recovery?.clear();}recovery?.close();return true;}catch(error){own?.release();throw error;}}
+      try{if(loaded&&!paused)own=await lifecycle.quiesce();
+        if(loaded){
+          if(dirty()&&closeIntent!==fingerprint)throw Error('DeckCraft changed after close confirmation.');
+          // The desktop acquires this native lease before revoking the account.
+          // Local media and presenter teardown still runs after sign-out.
+          checkFrame();
+          const value=frame.contentWindow?.deckcraft;
+          if(!paused||!pauseToken||typeof value?.request!=='function')throw Error('DeckCraft close lease unavailable.');
+          await nativeRequest(value,'engine.execute',{documentId:currentDocument,command:'host.finalizeClose',params:{lease:pauseToken}},checkFrame);
+          await recovery?.clear();
+        }
+        recovery?.close();return true;
+      }catch(error){own?.release();throw error;}}
   });
   function message(event){if(disposed||event.origin!==location.origin||event.source!==frame.contentWindow||!event.data||typeof event.data!=='object')return;const data=event.data;try{check();}catch(error){notify(error);return;}
     if(data.type==='deckcraft:ready'&&!nativeReady){nativeDocument=frame.contentDocument;nativeReady=true;if(data.openResult!==true){notify(Error('Correlated file adoption unavailable.'));startup.reject(Error('Correlated file adoption unavailable.'));return;}post('host',{version:'1'});void initialize().catch(notify);return;}

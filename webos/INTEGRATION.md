@@ -58,6 +58,9 @@ pending-notes rechecks. The native UI/control commands and binary adoption rejec
 mutations while paused. Desktop owns the single hosted navigation warning.
 Closing the view ends its own presentation/playback/presenter popup; no external
 shared service or job is owned by this adapter.
+During sign-out, Desktop acquires the lease before revoking the account session.
+Only finalization of that same paused native frame can run after revocation.
+Account commands still require the active session.
 
 Restricted ArtCraft logo/mark files are removed under the fork terms. The generic
 licensed DeckCraft app icon, About, community/source links and contributor/model

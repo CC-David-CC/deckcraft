@@ -55,7 +55,7 @@ function fixture(options={}) {
     }return node;}});
   globalThis.document=document;globalThis.window=listeners;globalThis.location={origin:'https://webos.test',href:'https://webos.test/'};
   const profiles=options.profiles??new Map();globalThis.localStorage={getItem:key=>profiles.get(key)??null,setItem:(key,value)=>profiles.set(key,value)};
-  const files={check(){},async read(path){calls.push(['read',path]);if(options.readError)throw Error('Source unavailable');return {sha256:SHA,data:Uint8Array.of(9)};},async version(){return {sha256:SHA};},async write(path,blob,expected){calls.push(['write',path,expected]);if(options.write)await options.write(path,blob,expected);server.set(path,new Uint8Array(await blob.arrayBuffer()));return {sha256:NEXT};},async list(){return {entries:[]};}};
+  const files={check(){options.checkAccount?.();},async read(path){calls.push(['read',path]);if(options.readError)throw Error('Source unavailable');return {sha256:SHA,data:Uint8Array.of(9)};},async version(){return {sha256:SHA};},async write(path,blob,expected){calls.push(['write',path,expected]);if(options.write)await options.write(path,blob,expected);server.set(path,new Uint8Array(await blob.arrayBuffer()));return {sha256:NEXT};},async list(){return {entries:[]};}};
   const view=mount({instanceId:'view',sessionId:'session',files,authority:human,authorize:async(caller,target)=>{authorizations.push(target);if(options.authorize)return options.authorize(caller,target);return caller===human;},url:'https://webos.test/deckcraft/',profileId:'account-A',...options.mount});
   const target=()=>({instanceId:'view',sessionId:'session',documentId:'11',resourceId:state.documents[0].path||'draft:11'});
   return {view,state,calls,server,profiles,authorizations,dispatch,target,document,get adoptions(){return adoptions;}};
@@ -156,6 +156,23 @@ test('unchanged blank closes quietly and native pause lease is held through fina
 test('Discard approval expires after a later native edit',async()=>{
   const f=fixture();try{await f.view.ready;await f.view.execute({...f.target(),command:'slide.new'},human);const closing=f.view.requestClose();await choose(f.view,'close','Discard changes');assert.equal(await closing,true);
     f.state.revision='3';f.state.documents[0].revision='3';await f.view.inspect();await assert.rejects(f.view.lifecycle.commitClose(),/changed after close confirmation/);
+  }finally{f.view.dispose();}
+});
+test('sign-out finalizes only the leased local view after the account session is revoked',async()=>{
+  let signedOut=false;
+  const f=fixture({checkAccount(){if(signedOut)throw new DOMException('Account session ended.','AbortError');}});
+  try {
+    await f.view.ready;
+    assert.equal(await f.view.requestClose(),true);
+    const lease=await f.view.lifecycle.quiesce();
+    try {
+      signedOut=true;
+      const before=f.calls.length;
+      await assert.rejects(f.view.execute({...f.target(),command:'file.save'},human),/Account session ended/);
+      assert.equal(await f.view.lifecycle.commitClose(),true);
+      assert.equal(f.state.finalized,true);
+      assert.deepEqual(f.calls.slice(before).map(([operation,method,args])=>[operation,method,args.command]),[['native','engine.execute','host.finalizeClose']]);
+    }finally{lease.release();}
   }finally{f.view.dispose();}
 });
 test('unavailable intended account file retains Retry and never becomes a ready blank',async()=>{
