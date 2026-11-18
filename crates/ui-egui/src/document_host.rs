@@ -6,6 +6,8 @@ use serde_json::{Value, json};
 
 use crate::SlideApp;
 
+const MAX_RECOVERY_NOTES: usize = 1024 * 1024;
+
 fn account_path(value: Option<&str>) -> Result<&str, String> {
     value
         .filter(|p| {
@@ -30,6 +32,7 @@ impl SlideApp {
         if self.notes_buf.2.edited && self.session.active().is_some_and(|d| d.uid == self.notes_buf.0) {
             self.session.execute("slide.notes", &json!({"body": self.notes_buf.2.body, "index": self.notes_buf.1})).map_err(|e| e.to_string())?;
             self.notes_buf.2.edited = false;
+            self.recovered_notes_pending = false;
         }
         Ok(())
     }
@@ -167,16 +170,24 @@ impl SlideApp {
                 if d.doc.media.iter().any(|media| media.link.is_some() && media.data.is_empty()) {
                     return Err("Recovery requires embedded media; an external media resource is unavailable".into());
                 }
-                let mut doc = (*d.doc).clone();
-                if self.notes_buf.0 == d.uid && self.notes_buf.2.edited {
-                    let slide = doc.slides.get_mut(self.notes_buf.1).ok_or("Pending notes slide is unavailable")?;
-                    Arc::make_mut(slide).notes = self.notes_buf.2.body.clone();
-                }
-                let bytes = deckcraft_engine::cmd::file::save_bytes(&doc, "deckcraft").map_err(|e| e.to_string())?;
+                let notes_draft = if self.notes_buf.0 == d.uid && self.notes_buf.2.edited {
+                    if self.notes_buf.1 >= d.doc.slides.len() {
+                        return Err("Pending notes slide is unavailable".into());
+                    }
+                    let body = serde_json::to_string(&self.notes_buf.2.body).map_err(|e| e.to_string())?;
+                    if body.len() > MAX_RECOVERY_NOTES {
+                        return Err("Pending notes exceed the recovery size limit".into());
+                    }
+                    Some(json!({"slide": self.notes_buf.1, "body": body}))
+                } else {
+                    None
+                };
+                let bytes = deckcraft_engine::cmd::file::save_bytes(&d.doc, "deckcraft").map_err(|e| e.to_string())?;
                 if bytes.len() > 128 * 1024 * 1024 {
                     return Err("Recovery snapshot exceeds 128 MiB".into());
                 }
-                Ok(json!({"version": 1, "revision": d.revision.to_string(), "data": deckcraft_engine::cmd::base64_encode(&bytes)}))
+                Ok(json!({"version": 1, "revision": d.revision.to_string(), "data": deckcraft_engine::cmd::base64_encode(&bytes),
+                    "notesDraft": notes_draft}))
             }
             "host.restore" => {
                 let snapshot = p.get("snapshot").ok_or("Native snapshot required")?;
@@ -185,12 +196,29 @@ impl SlideApp {
                 }
                 let data =
                     snapshot.get("data").and_then(Value::as_str).filter(|s| s.len() <= 178_956_972).ok_or("Bounded native snapshot required")?;
+                let notes_draft = if let Some(draft) = snapshot.get("notesDraft").filter(|draft| !draft.is_null()) {
+                    let slide =
+                        draft.get("slide").and_then(Value::as_u64).and_then(|slide| usize::try_from(slide).ok()).ok_or("Invalid notes slide")?;
+                    let body =
+                        draft.get("body").and_then(Value::as_str).filter(|s| s.len() <= MAX_RECOVERY_NOTES).ok_or("Bounded notes body required")?;
+                    let body: deckcraft_model::text::TextBody = serde_json::from_str(body).map_err(|e| e.to_string())?;
+                    Some((slide, body))
+                } else {
+                    None
+                };
                 let bytes = deckcraft_engine::cmd::base64_decode(data).ok_or("Invalid native snapshot")?;
-                let outcome = self.open_from_host(Some("Recovery.deckcraft"), &bytes)?;
+                let outcome = self.open_from_host_at(Some("Recovery.deckcraft"), &bytes, notes_draft.as_ref().map(|(slide, _)| *slide))?;
                 let d = self.session.active_mut().ok_or("Recovered document unavailable")?;
                 d.path = None;
                 d.saved_doc = Arc::new((*d.doc).clone());
                 d.revision = d.revision.saturating_add(1);
+                if let Some((slide, body)) = notes_draft {
+                    d.selection.slide = slide;
+                    self.notes_buf = (d.uid, slide, crate::notes::Draft { text: body.text(), body, edited: true });
+                    self.recovered_notes_pending = true;
+                    self.ui.notes = true;
+                    self.ui.view = crate::ViewMode::Normal;
+                }
                 Ok(json!({"documentId": outcome.document_id.to_string(), "revision": d.revision.to_string()}))
             }
             "host.profile" => Ok(json!({"version": 1, "ui": self.ui, "prefs": self.session.prefs})),
@@ -301,14 +329,29 @@ mod tests {
         let bytes = deckcraft_engine::cmd::base64_decode(snapshot["data"].as_str().unwrap()).unwrap();
         let recovered = deckcraft_engine::cmd::file::loaded_file("recovered.deckcraft", &bytes).unwrap();
         assert_eq!(recovered.doc.slides.len(), 2);
-        assert_eq!(recovered.doc.slides[1].notes, body);
+        assert_eq!(recovered.doc.slides[1].notes.text(), "");
         assert_eq!(recovered.doc.media[0].data.as_slice(), &[1, 2, 3, 4]);
         assert_eq!(before.slides[1].notes.text(), "");
         let mut restored = hosted();
+        let blank = restored.session.doc().unwrap().uid;
+        let mut invalid = snapshot.clone();
+        invalid["notesDraft"]["slide"] = json!(100);
+        assert!(restored.run("host.restore", json!({"snapshot":invalid})).is_err());
+        assert_eq!(restored.session.doc().unwrap().uid, blank);
         restored.run("host.restore", json!({"snapshot":snapshot})).unwrap();
         assert_eq!(restored.session.documents().len(), 1);
         assert!(restored.session.doc().unwrap().is_dirty());
         assert_eq!(restored.session.doc().unwrap().path, None);
+        assert_eq!(restored.session.doc().unwrap().selection.slide, 1);
+        let ctx = egui::Context::default();
+        let mut frame = ctx.run_ui(egui::RawInput::default(), |ui| crate::status::notes_pane(&mut restored, ui));
+        frame.textures_delta.clear(); // This headless test has no renderer.
+        assert!(restored.notes_buf.2.edited);
+        assert_eq!(restored.notes_buf.2.body, body);
+        assert_eq!(restored.session.doc().unwrap().doc.slides[1].notes.text(), "");
+        restored.flush_host_notes().unwrap();
+        assert!(!restored.notes_buf.2.edited);
+        assert_eq!(restored.session.doc().unwrap().doc.slides[1].notes, body);
     }
 
     #[test]

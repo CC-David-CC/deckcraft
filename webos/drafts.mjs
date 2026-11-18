@@ -11,9 +11,16 @@ export function captureDraft(value) {
       typeof snapshot.revision !== 'string' || snapshot.revision.length>20 || !/^[0-9]+$/.test(snapshot.revision)) {
     throw Error('Invalid DeckCraft recovery snapshot.');
   }
+  const draft = snapshot.notesDraft;
+  if (draft != null && (!Number.isSafeInteger(draft.slide) || draft.slide < 0 ||
+      typeof draft.body !== 'string' || !draft.body || draft.body.length > 1024 * 1024 ||
+      new TextEncoder().encode(draft.body).length > 1024 * 1024)) {
+    throw Error('Invalid DeckCraft pending notes.');
+  }
   // Only these explicit fields enter storage. No capability, password, token,
   // key, native UI preference or caller-supplied extra metadata is retained.
-  return {path, revision, snapshot:{version:1,data:snapshot.data,revision:snapshot.revision}};
+  return {path, revision, snapshot:{version:1,data:snapshot.data,revision:snapshot.revision,
+    ...(draft != null ? {notesDraft:{slide:draft.slide,body:draft.body}} : {})}};
 }
 
 export function createDraftStore(options) {

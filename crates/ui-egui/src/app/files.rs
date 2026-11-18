@@ -649,6 +649,15 @@ impl SlideApp {
     /// with ([`Self::start_for_host`]), if that one is still open, untitled and unchanged; later
     /// files open beside the others.
     pub fn open_from_host(&mut self, name: Option<&str>, bytes: &[u8]) -> Result<crate::HostOpenOutcome, String> {
+        self.open_from_host_at(name, bytes, None)
+    }
+
+    pub(crate) fn open_from_host_at(
+        &mut self,
+        name: Option<&str>,
+        bytes: &[u8],
+        recovery_slide: Option<usize>,
+    ) -> Result<crate::HostOpenOutcome, String> {
         if self.host_pause.is_some() {
             return Err("The document is paused".into());
         }
@@ -662,6 +671,9 @@ impl SlideApp {
         let shown = name.unwrap_or("Presentation");
         let named = name.is_some_and(|n| is_presentation_name(&n.to_ascii_lowercase()));
         let opened = deckcraft_engine::cmd::file::loaded_file(shown, bytes).and_then(|mut f| {
+            if recovery_slide.is_some_and(|slide| slide >= f.doc.slides.len()) {
+                return Err(deckcraft_engine::EngineError::Other("Pending notes slide is unavailable".into()));
+            }
             // `file.adopt` keeps the path only for a native file; a name the page didn't send
             // for a presentation must not become one.
             f.native &= named;

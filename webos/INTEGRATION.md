@@ -37,11 +37,14 @@ are create-only, preserve identity, and are never acknowledged as document saves
 Unknown outcomes retain the native pending guard. Print currently produces a PDF
 copy; no graphical print-dialog qualification is claimed.
 
-Native recovery version1 is a `.deckcraft` ZIP holding the full presentation,
-embedded media and chart parts. Pending formatted notes are overlaid into a
-disposable Rust presentation without altering the live buffer. Slide typing and
-supported IME preedit already live in the native document. Recovery does not
-reconstruct undo, selection, dialog state or platform IME ownership. An unresolved
+Native recovery version 1 stores a `.deckcraft` ZIP holding the presentation,
+embedded media and chart parts. It carries unfinished speaker notes separately
+as bounded formatted text for their original slide. Recovery reopens that slide
+with the notes still pending. The recovered draft stays out of the slide model
+until ordinary editing or manual Save commits it. Existing snapshots without
+the separate draft can still reopen. Slide typing and supported IME preedit
+already live in the native document. Recovery does not reconstruct undo, general
+selection, dialog state or platform IME ownership. An unresolved
 external media resource or unfinished native edit dialog refuses a new checkpoint;
 the previous committed journal record remains. Changed/unverifiable saved bases
 require Save As to a different resource. Quiet untouched blanks remain explicitly

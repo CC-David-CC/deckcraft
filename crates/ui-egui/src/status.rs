@@ -186,7 +186,11 @@ pub fn notes_pane(app: &mut SlideApp, ui: &mut Ui) {
     // anything reloads it), to the slide it was written on.
     let id = egui::Id::unique("notes_edit");
     let focused = ui.ctx().memory(|m| m.has_focus(id));
-    if app.notes_buf.2.edited && (!focused || app.notes_buf.0 != uid || app.notes_buf.1 != idx) {
+    let same_slide = app.notes_buf.0 == uid && app.notes_buf.1 == idx;
+    if focused || !same_slide {
+        app.recovered_notes_pending = false;
+    }
+    if app.notes_buf.2.edited && (!same_slide || (!focused && !app.recovered_notes_pending)) {
         app.notes_buf.2.edited = false;
         if app.notes_buf.0 == uid {
             let _ = app.run("slide.notes", json!({"body": app.notes_buf.2.body, "index": app.notes_buf.1}));
@@ -204,7 +208,7 @@ pub fn notes_pane(app: &mut SlideApp, ui: &mut Ui) {
             ui.painter()
                 .line_segment([pos2(rect.min.x - 8.0, rect.min.y - 6.0), pos2(rect.max.x + 8.0, rect.min.y - 6.0)], Stroke::new(1.0, t.separator));
             // Keep a local draft per slide, following the notes while the field isn't focused.
-            if app.notes_buf.0 != uid || app.notes_buf.1 != idx || (!focused && app.notes_buf.2.body != notes) {
+            if !same_slide || (!focused && !app.recovered_notes_pending && app.notes_buf.2.body != notes) {
                 app.notes_buf = (uid, idx, crate::notes::Draft::new(&notes));
             }
             let mut draft = app.notes_buf.2.clone();

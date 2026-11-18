@@ -95,6 +95,7 @@ impl SlideApp {
             last_recovery: 0.0,
             quit_confirmed: false,
             notes_buf: (0, usize::MAX, notes::Draft::default()),
+            recovered_notes_pending: false,
             ui_fonts: uifonts::UiFonts::default(),
             thumb_drag: None,
             selpane: selpane::State::default(),

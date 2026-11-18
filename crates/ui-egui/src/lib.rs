@@ -323,6 +323,8 @@ pub struct SlideApp {
     /// Quit was confirmed (changes saved or discarded): let the window close.
     pub quit_confirmed: bool,
     pub(crate) notes_buf: (u64, usize, notes::Draft),
+    /// A restored draft remains pending until the user returns to its field or leaves its slide.
+    pub(crate) recovered_notes_pending: bool,
     /// Faces borrowed from the font database for text the interface fonts can't draw (#101).
     pub ui_fonts: uifonts::UiFonts,
     /// Slide drag in the thumbnail pane or the Slide Sorter: the dragged slides and the drop gap.
