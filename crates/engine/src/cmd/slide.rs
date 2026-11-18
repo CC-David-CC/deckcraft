@@ -47,7 +47,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Notes",
             ["View"],
             None,
-            "{text | body: formatted notes (as in slide.inspect's notesBody), index?} (text as typed: untouched notes keep their formatting)",
+            "{text | body: formatted notes, slideId? | index?} (text as typed: untouched notes keep their formatting)",
             has_slide,
             notes
         ),
@@ -592,7 +592,16 @@ fn reset(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn notes(s: &mut Session, p: &Value) -> Result<Value> {
-    let i = index_of(s, p)?;
+    let i = if let Some(value) = p.get("slideId") {
+        if p.get("index").is_some() {
+            return Err(bad("slide.notes", "choose either a slideId or an index"));
+        }
+        let id = value.as_u64().and_then(|id| u32::try_from(id).ok()).map(SlideId);
+        let st = s.doc()?;
+        id.and_then(|id| st.doc.slide_index(id)).ok_or_else(|| bad("slide.notes", "unknown slideId"))?
+    } else {
+        index_of(s, p)?
+    };
     // Formatted notes as a whole (the notes editors), or text: then only what was retyped
     // changes, so bold, levels and bullets around it survive.
     let body = match p.get("body") {

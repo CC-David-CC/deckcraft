@@ -25,6 +25,9 @@ impl SlideApp {
             return Err("The document is paused for session finalization".into());
         }
         if self.host_documents {
+            if id == "slide.notes" && params.get("slideId").is_some() && !self.host_document_idle() {
+                return Err("Finish the current presentation edit or operation first".into());
+            }
             let request = match id {
                 "file.new" => Some("file.new"),
                 "file.open" | "app.openDialog" => Some("file.open"),

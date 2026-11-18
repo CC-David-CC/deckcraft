@@ -236,6 +236,10 @@ impl SlideApp {
     }
 
     pub(crate) fn host_autosave_eligible(&self) -> bool {
+        self.host_document_idle() && self.session.active().is_some_and(|d| d.path.is_some())
+    }
+
+    pub(crate) fn host_document_idle(&self) -> bool {
         self.host_documents
             && self.host_pause.is_none()
             && self.dialog.is_none()
@@ -244,10 +248,7 @@ impl SlideApp {
             && !self.notes_buf.2.edited
             && self.ime_composition.is_none()
             && self.ime_terminal_pending.is_none()
-            && self
-                .session
-                .active()
-                .is_some_and(|d| d.path.is_some() && d.composition.is_none() && d.interaction.is_none() && d.selection.text.is_none())
+            && self.session.active().is_some_and(|d| d.composition.is_none() && d.interaction.is_none() && d.selection.text.is_none())
     }
 
     pub(crate) fn notes_fingerprint(&self) -> String {
@@ -439,6 +440,21 @@ mod tests {
         doc.media[0].link = Some("/unavailable/local.mp4".into());
         assert!(app.run("host.snapshot", json!({})).unwrap_err().contains("embedded media"));
         assert!(app.run("file.recovery.open", json!({})).is_err());
+    }
+
+    #[test]
+    fn stable_slide_notes_respect_an_unfinished_host_edit() {
+        let mut app = hosted();
+        let uid = app.session.doc().unwrap().uid;
+        let id = app.session.doc().unwrap().doc.slides[0].id;
+        app.notes_buf = (uid, 0, crate::notes::Draft { edited: true, ..Default::default() });
+        let request = json!({"slideId":id,"text":"Approved notes"});
+        assert!(app.run("slide.notes", request.clone()).unwrap_err().contains("Finish"));
+        assert!(app.notes_buf.2.edited);
+        assert!(app.session.doc().unwrap().doc.slides[0].notes.text().is_empty());
+        app.notes_buf.2.edited = false;
+        app.run("slide.notes", request).unwrap();
+        assert_eq!(app.session.doc().unwrap().doc.slides[0].notes.text(), "Approved notes");
     }
 
     #[test]

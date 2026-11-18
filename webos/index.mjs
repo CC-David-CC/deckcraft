@@ -8,6 +8,14 @@ const digest = value => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value
 const deferred = () => { let resolve, reject; const promise = new Promise((yes,no)=>{resolve=yes;reject=no;});promise.catch(()=>{});return {promise,resolve,reject}; };
 const MAX = 128*1024*1024;
 const base64 = bytes => {const parts=[];for(let i=0;i<bytes.length;i+=24576){let text='';for(const b of bytes.subarray(i,i+24576))text+=String.fromCharCode(b);parts.push(btoa(text));}return parts.join('');};
+
+export const delegatedCommands = Object.freeze({
+  'document.inspect': args => args && typeof args === 'object' && !Array.isArray(args) && !Object.keys(args).length,
+  'slide.notes': args => args && typeof args === 'object' && !Array.isArray(args) &&
+    Object.keys(args).length === 2 && Number.isInteger(args.slideId) && args.slideId > 0 &&
+    args.slideId <= 0xffff_ffff && typeof args.text === 'string' && args.text.length <= 32_767
+});
+
 export function mount({instanceId,sessionId,resource=null,imported=null,template=null,recovery=null,recoveryAsCopy=false,profileId='',files,authority,authorize,
   openFile,activateFile,newDocument,importDocument,closeView,displayName='',url,signal:parentSignal}) {
   if(authority==null||typeof authorize!=='function')throw Error('Explicit human authority required.');
@@ -149,10 +157,17 @@ export function mount({instanceId,sessionId,resource=null,imported=null,template
     const resourceId=binding()?.path||'draft:'+currentDocument;
     if(!loaded||paused||captured.instanceId!==instanceId||captured.sessionId!==sessionId||captured.documentId!==currentDocument||!identity(captured.documentId)||captured.resourceId!==resourceId||typeof captured.command!=='string')throw Error('Exact instance, session, native document and account resource required.');
     if(captured.command.startsWith('host.')||['file.openBytes','file.adopt','file.recovery.open','file.recovery.save','file.recovery.list','file.import'].includes(captured.command))throw Error('This operation belongs to the document host.');
-    if(caller!==authority)throw Error('Delegated native command transport is not connected for this view.');
-    if(await authorize(caller,{instanceId,sessionId,documentId:currentDocument,resourceId,operation:captured.command})!==true)throw Error('Document operation denied.');check();await inspectNative();
+    const delegated = caller !== authority;
+    const args = captured.args || {};
+    if (delegated && (!Object.hasOwn(delegatedCommands,captured.command) || !delegatedCommands[captured.command](args))) {
+      throw Error('Delegated operation is outside the presentation command contract.');
+    }
+    if (delegated && captured.command === 'slide.notes' && pending()) throw Error('Finish the pending presentation operation first.');
+    if(await authorize(caller,{instanceId,sessionId,documentId:currentDocument,resourceId,operation:captured.command})!==true)throw Error('Document operation denied.');check();
+    // The integrated caller checks and consumes a one-use capability at this
+    // point. Keep its admission and native dispatch in the same turn.
+    if (!delegated) await inspectNative();
     if(captured.documentId!==currentDocument||(binding()?.path||'draft:'+currentDocument)!==resourceId)throw Error('Document changed during authorization.');
-    const args=captured.args||{};
     if(['file.new','file.open','file.close','file.saveAs'].includes(captured.command)){if(captured.command==='file.saveAs'&&!args.path)throw Error('Programmatic Save As requires an account path.');return hostAction(captured.command,args);}
     if(captured.command==='file.save'){if(Object.keys(args).length)throw Error('Use Save As for destination changes.');return saveDocument();}
     if(captured.command.startsWith('file.'))throw Error('Use the native File controls for this operation.');

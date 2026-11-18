@@ -140,6 +140,25 @@ test('stale instance/session/resource and private acknowledgements cannot execut
     assert.equal(f.calls.some(call=>call[0]==='native'&&call[2].command==='slide.new'),false);
   }finally{f.view.dispose();}
 });
+
+test('delegated notes require an authorized native slide ID and leave file operations human-only', async () => {
+  const agent = Object.freeze({});
+  const f = fixture({authorize:(caller,target) => caller === human ||
+    caller === agent && target.operation === 'slide.notes' && target.documentId === '11'});
+  try {
+    await f.view.ready;
+    const request = {...f.target(),command:'slide.notes',args:{slideId:19,text:'Speaker notes'}};
+    await assert.rejects(f.view.execute(request,{}), /denied/);
+    await assert.rejects(f.view.execute({...request,args:{index:0,text:'Wrong target'}},agent), /command contract/);
+    await assert.rejects(f.view.execute({...request,command:'file.saveAs',args:{path:'Talks/Other.pptx'}},agent), /command contract/);
+    await f.view.execute(request,agent);
+    const calls = f.calls.filter(call => call[0] === 'native' && call[2].command === 'slide.notes');
+    assert.deepEqual(calls, [['native','engine.execute',{documentId:'11',command:'slide.notes',params:request.args}]]);
+  } finally {
+    f.view.dispose();
+  }
+});
+
 test('both account Open routes activate the Desktop resource and preserve this native editor',async()=>{
   const activated=[],opened=[],f=fixture({mount:{activateFile:file=>{activated.push(file.path);return true;},openFile:file=>opened.push(file)}});try{await f.view.ready;
     await f.view.execute({...f.target(),command:'file.open',args:{path:'Talks/Existing.pptx'}},human);

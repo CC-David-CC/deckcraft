@@ -30,6 +30,23 @@ fn new_presentation_and_slides() {
 }
 
 #[test]
+fn notes_target_the_same_slide_after_a_reorder() {
+    let mut s = session();
+    s.execute("slide.new", &json!({})).unwrap();
+    let id = s.doc().unwrap().doc.slides[0].id;
+    s.execute("slide.move", &json!({"from":0,"to":1})).unwrap();
+    s.execute("slide.notes", &json!({"slideId":id,"text":"Notes for the original slide"})).unwrap();
+    let doc = &s.doc().unwrap().doc;
+    assert_eq!(doc.slide_index(id), Some(1));
+    assert!(doc.slides[0].notes.text().is_empty());
+    assert_eq!(doc.slides[1].notes.text(), "Notes for the original slide");
+    assert!(s.execute("slide.notes", &json!({"slideId":id,"index":0,"text":"Wrong target"})).is_err());
+    s.execute("slide.delete", &json!({"index":1})).unwrap();
+    assert!(s.execute("slide.notes", &json!({"slideId":id,"text":"Missing target"})).is_err());
+    assert!(s.doc().unwrap().doc.slides[0].notes.text().is_empty());
+}
+
+#[test]
 fn text_transform_sets_and_clears_a_warp() {
     let mut s = session();
     let r = s.execute("shape.insert", &json!({"preset": "rect", "rect": [80.0, 80.0, 420.0, 160.0], "text": "ARCH"})).unwrap();
