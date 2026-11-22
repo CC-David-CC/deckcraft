@@ -351,7 +351,8 @@ impl SlideApp {
                 ViewMode::Sorter => sorter::show(self, ui),
                 ViewMode::NotesPage => sorter::notes_page(self, ui),
                 ViewMode::Outline | ViewMode::Normal | ViewMode::Reading => {
-                    let compact = self.ui.view == ViewMode::Normal && ui.available_width() <= 540.0
+                    let compact = self.ui.view == ViewMode::Normal
+                        && ui.available_width() <= 540.0
                         && self.session.active().is_some_and(|d| d.selection.target == Target::Slides);
                     if compact {
                         if thumbs::compact_navigation(self, ui) {
