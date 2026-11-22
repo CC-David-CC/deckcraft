@@ -48,7 +48,7 @@ export function mount({instanceId,sessionId,resource=null,imported=null,template
   const pending=()=>initializing||saveChoosing||autoPending||commandPending>0||dialogs.active||fileSession.inspect().pending.length>0||!!native&&Object.keys(native.pendingSaves).length>0;
   const binding=()=>fileSession.inspect().bindings.find(d=>d.documentId===currentDocument);
   const bindingSnapshot=()=>Object.freeze({documentId:currentDocument,path:binding()?.path??null,revision:binding()?.sha256??null,loaded});
-  const dialogs=createDialogs({element,signal:abort.signal,check,onChange:()=>changed(),onClose:()=>focus()});
+  const dialogs=createDialogs({element, temporary: files.temporary === true,signal:abort.signal,check,onChange:()=>changed(),onClose:()=>focus()});
   function autosaveIdentity(){const source=binding();return loaded&&source?JSON.stringify([location.origin,profileId,instanceId,sessionId,currentDocument,source.path]):null;}
   function observeAutosave(){if(!autosave||disposed||nativeInvalidated)return;const identity=autosaveIdentity(),uncertain=fileSession.inspect().pending.some(item=>item.state==='unknown');
     autosave.observe({identity,version:native?.revision||'0',dirty:dirty(),eligible:autosaveEnabled&&!!identity&&!needsCopy&&!paused&&!initializing&&!saveChoosing&&!dialogs.active&&!commandPending&&native?.autosaveEligible===true,
@@ -68,11 +68,11 @@ export function mount({instanceId,sessionId,resource=null,imported=null,template
     }finally{autoPending=false;if(!disposed){changed();observeAutosave();}}
   }
   autosave=createAccountAutosave({save:automaticSave,onState(value){if(disposed)return;
-    if(value.state==='saving')status.textContent='AutoSaving to your account…';
+    if(value.state==='saving')status.textContent=(files.temporary ? 'AutoSaving in this tab…' : 'AutoSaving to your account…');
     if(value.state==='scheduled')status.textContent='Unsaved changes; AutoSave scheduled.';
-    if(value.state==='waiting'&&loaded)status.textContent=binding()?'AutoSave waits until the native edit finishes. Browser recovery continues.':'Use Save As to save this presentation to your account.';
-    if(value.state==='idle'&&lastAutosaveState==='saving')status.textContent='No account changes are waiting.';
-    if(value.state==='retrying')status.textContent='AutoSave will retry a known failed write. Browser recovery continues.';
+    if(value.state==='waiting'&&loaded)status.textContent=binding()?(files.temporary ? 'AutoSave waits until the edit finishes.' : 'AutoSave waits until the native edit finishes. Browser recovery continues.'):(files.temporary ? 'Use Save As to keep this presentation in this tab.' : 'Use Save As to save this presentation to your account.');
+    if(value.state==='idle'&&lastAutosaveState==='saving')status.textContent=(files.temporary ? 'All changes are saved in this tab.' : 'No account changes are waiting.');
+    if(value.state==='retrying')status.textContent=(files.temporary ? 'AutoSave in this tab will retry.' : 'AutoSave will retry a known failed write. Browser recovery continues.');
     if(value.state==='paused')status.textContent='AutoSave paused: '+value.reason;
     status.title=status.textContent;lastAutosaveState=value.state;
   }});
@@ -97,7 +97,7 @@ export function mount({instanceId,sessionId,resource=null,imported=null,template
       if(destination&&!/[.](pptx|potx|ppsx|deckcraft)$/i.test(destination))throw Error('Choose a presentation file extension.');
       const sourceExtension=message.name.split('.').at(-1).toLowerCase();if(destination&&destination.split('.').at(-1).toLowerCase()!==sourceExtension)throw Error('Choose the same format as the prepared presentation.');
       const result=await fileSession.save(message,authority,destination,receipt=>hostCommand('host.acknowledgeSave',{id:receipt.id,path:receipt.path},receipt.documentId));durable=true;check();
-      await inspectNative();needsCopy=false;autosaveBlock=null;observeAutosave();autosave?.confirmed({identity:autosaveIdentity()});status.textContent='Saved to your account: '+result.path;changed();done.resolve(result);void checkpoint().catch(notify);
+      await inspectNative();needsCopy=false;autosaveBlock=null;observeAutosave();autosave?.confirmed({identity:autosaveIdentity()});status.textContent=(files.temporary ? 'Saved in this tab: ' : 'Saved to your account: ')+result.path;changed();done.resolve(result);void checkpoint().catch(notify);
     }catch(error){if(durable)error.outcome='unknown';const outcome=error.outcome==='unknown'?'unknown':error.status===409?'conflict':error.name==='AbortError'?'cancelled':'failed';
       if(!disposed){if(outcome==='unknown'||outcome==='conflict'){autosaveBlock={identity:autosaveIdentity(),reason:error.message};observeAutosave();}notify(Error(error.message+(outcome==='unknown'?' The server outcome is unknown; check the account file before retrying.':'')));try{post('save-failed',{id:message.id,outcome,error:status.textContent});}catch{}}
       done.reject(error);
@@ -107,7 +107,7 @@ export function mount({instanceId,sessionId,resource=null,imported=null,template
     const documentId=currentDocument,resourceId=binding()?.path||'draft:'+documentId,path=await dialogs.path('Documents/'+message.name);check();if(!path)return;
     if(await authorize(authority,{instanceId,sessionId,documentId,resourceId,operation:'file.export',destination:path})!==true)throw Error('Export denied.');check();
     if(documentId!==currentDocument||(binding()?.path||'draft:'+documentId)!==resourceId)throw Error('Export target changed.');
-    const saved=await files.write(path,new Blob([message.bytes]),null,{signal:abort.signal});check();if(!digest(saved?.sha256))throw Error('Invalid durable copy confirmation.');status.textContent='Exported account copy: '+path;
+    const saved=await files.write(path,new Blob([message.bytes]),null,{signal:abort.signal});check();if(!digest(saved?.sha256))throw Error('Invalid durable copy confirmation.');status.textContent=(files.temporary ? 'Exported in this tab: ' : 'Exported account copy: ')+path;
   }
   async function saveDocument(asCopy=false,path=null,format=null){check();await inspectNative();const original=binding();if(asCopy||!original||needsCopy){const suggested=original?.path||'Documents/Presentation.pptx';path=path??await dialogs.path(format&&['pptx','deckcraft'].includes(format)?suggested.replace(/[.][^./]+$/,'.'+format):suggested);check();if(!path)return false;canonicalPath(path);}
     preparedDestination={documentId:currentDocument,path};
@@ -124,7 +124,7 @@ export function mount({instanceId,sessionId,resource=null,imported=null,template
       if(choice.kind==='account')return openAccount(choice.path);if(typeof importDocument!=='function')throw Error('Desktop import is unavailable.');const bytes=new Uint8Array(await choice.file.arrayBuffer());check();return importDocument({name:choice.file.name,data:base64(bytes)});
     }throw Error('Unknown document request.');
   }
-  const profileKey=profileId?'webos-deckcraft-profile-v1:'+location.origin+':'+profileId:null;
+  const profileKey=!files.temporary && profileId?'webos-deckcraft-profile-v1:'+location.origin+':'+profileId:null;
   async function loadProfile(){if(!profileKey)return;try{const text=localStorage.getItem(profileKey);if(text&&text.length<=4*1024*1024){const profile=JSON.parse(text);if(profile.version===1){autosaveEnabled=typeof profile.accountAutosaveEnabled==='boolean'?profile.accountAutosaveEnabled:true;autoToggle.textContent=autosaveEnabled?'AutoSave: On':'AutoSave: Off';autoToggle.setAttribute('aria-pressed',String(autosaveEnabled));await hostCommand('host.applyProfile',profile);lastProfileText=text;}}}catch(error){notify(Error('Account preferences unavailable: '+error.message));}}
   async function persistProfile(){if(!profileKey||!loaded||disposed)return;const value=await hostCommand('host.profile');check();value.accountAutosaveEnabled=autosaveEnabled;const text=JSON.stringify(value);if(text.length<=4*1024*1024&&text!==lastProfileText){localStorage.setItem(profileKey,text);lastProfileText=text;}}
   async function initialize(){check();if(initializing||loaded)return;initializing=true;phase='loading';retryButton.hidden=true;frame.inert=true;changed();
@@ -138,10 +138,10 @@ export function mount({instanceId,sessionId,resource=null,imported=null,template
         }else{await recovery.clear();check();draft=null;}
       }
       if(!draft){if(resource){canonicalPath(resource.path);let selected=resource;if(resource.restore){const version=await files.version(resource.path);check();selected={path:resource.path,sha256:version.sha256};}
-          const opened=await fileSession.open(selected,authority,adopt);currentDocument=opened.documentId;if(opened.sourceRetained)await bindNative(currentDocument,resource.path);status.textContent='Opened account file: '+resource.path;
+          const opened=await fileSession.open(selected,authority,adopt);currentDocument=opened.documentId;if(opened.sourceRetained)await bindNative(currentDocument,resource.path);status.textContent=(files.temporary ? 'Opened in this tab: ' : 'Opened account file: ')+resource.path;
         }else if(imported){if(typeof imported.name!=='string'||typeof imported.data!=='string'||imported.data.length>Math.ceil(MAX/3)*4)throw Error('Invalid presentation import.');
-          const text=atob(imported.data),bytes=Uint8Array.from(text,c=>c.charCodeAt(0));const result=await adopt(imported.name,bytes);currentDocument=result.documentId;await hostCommand('host.unbind');status.textContent='Imported presentation; use Save As to save it to your account.';
-        }else{if(template&&Object.keys(template).length)await hostCommand('host.newInitial',template);status.textContent='New presentation; not saved to your account.';}}
+          const text=atob(imported.data),bytes=Uint8Array.from(text,c=>c.charCodeAt(0));const result=await adopt(imported.name,bytes);currentDocument=result.documentId;await hostCommand('host.unbind');status.textContent=(files.temporary ? 'Imported presentation. Use Save As to keep it in this tab.' : 'Imported presentation; use Save As to save it to your account.');
+        }else{if(template&&Object.keys(template).length)await hostCommand('host.newInitial',template);status.textContent=(files.temporary ? 'New temporary presentation. Save to Files in this tab.' : 'New presentation; not saved to your account.');}}
       await inspectNative();await api().request('engine.execute',{documentId:currentDocument,command:'app.backstage',params:{on:false}});check();await inspectNative();
       loaded=true;phase='ready';frame.inert=false;observeAutosave();clearTimeout(startupTimer);startup.resolve();changed();schedule();imported=null;
     }catch(error){if(!disposed){phase='unavailable';notify(Error('Could not open '+(resource?.path||'this presentation')+': '+error.message));retryButton.textContent='Retry';retryButton.hidden=false;startup.reject(error);}throw error;
