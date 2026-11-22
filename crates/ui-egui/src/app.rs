@@ -351,12 +351,21 @@ impl SlideApp {
                 ViewMode::Sorter => sorter::show(self, ui),
                 ViewMode::NotesPage => sorter::notes_page(self, ui),
                 ViewMode::Outline | ViewMode::Normal | ViewMode::Reading => {
+                    let compact = self.ui.view == ViewMode::Normal && ui.available_width() <= 540.0
+                        && self.session.active().is_some_and(|d| d.selection.target == Target::Slides);
+                    if compact {
+                        if thumbs::compact_navigation(self, ui) {
+                            return;
+                        }
+                    } else {
+                        self.ui.compact_slides = false;
+                    }
                     if self.ui.pane.is_some() {
                         panes::show(self, ui);
                     }
                     if self.ui.view == ViewMode::Outline {
                         sorter::outline_pane(self, ui);
-                    } else {
+                    } else if !compact {
                         thumbs::show(self, ui);
                     }
                     egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.canvas)).show(ui, |ui| {

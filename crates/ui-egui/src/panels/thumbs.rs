@@ -79,6 +79,31 @@ pub(crate) fn drop_slide_drag(app: &mut SlideApp) {
     }
 }
 
+/// On narrow windows the slide list and canvas share the available space.
+pub(crate) fn compact_navigation(app: &mut SlideApp, ui: &mut Ui) -> bool {
+    egui::Panel::top("compact_slide_navigation").show(ui, |ui| {
+        ui.horizontal(|ui| {
+            if ui.add_sized([80.0, 44.0], egui::Button::new("Slides").selected(app.ui.compact_slides)).clicked() {
+                app.ui.compact_slides = !app.ui.compact_slides;
+                app.slides_focused = app.ui.compact_slides;
+            }
+            if ui.add_sized([80.0, 44.0], egui::Button::new("Notes").selected(app.ui.notes && !app.ui.compact_slides)).clicked() {
+                app.ui.notes = app.ui.compact_slides || !app.ui.notes;
+                app.ui.compact_slides = false;
+                app.slides_focused = false;
+            }
+        });
+    });
+    if app.ui.compact_slides {
+        app.slide_rect = None;
+        app.canvas_rect = None;
+        let out = egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| list(app, ui));
+        app.ui.thumbs_scroll = out.state.clamped_offset().y;
+        return true;
+    }
+    false
+}
+
 /// Render the slide thumbnail pane, including section headers, selection, and scroll state.
 pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
@@ -254,6 +279,10 @@ fn list(app: &mut SlideApp, ui: &mut Ui) {
                     let _ = app.run("slide.selectSlides", json!({"ids": [id.0], "add": true}));
                 } else {
                     let _ = app.run("slide.go", json!({"index": i}));
+                    if app.ui.compact_slides {
+                        app.ui.compact_slides = false;
+                        app.slides_focused = false;
+                    }
                 }
             }
         }

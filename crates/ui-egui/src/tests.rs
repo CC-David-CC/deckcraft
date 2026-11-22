@@ -942,6 +942,33 @@ fn copy_then_paste_shortcut_duplicates_an_object_without_text() {
     assert!(pasted.text.as_ref().is_none_or(|t| t.text().is_empty()), "a copy of the rectangle, not a text box holding the marker");
 }
 
+/// Compact slide navigation shares the canvas area without saving over desktop pane preferences.
+#[test]
+fn compact_slides_open_on_demand_then_return_to_editing() {
+    let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(336.0, 760.0)).build_ui_state(
+        |ui, app: &mut SlideApp| {
+            app.logic(ui.ctx());
+            app.ui(ui);
+        },
+        SlideApp::new(Session::with_new(), Services::default()),
+    );
+    harness.run_steps(3);
+    harness.state_mut().run("slide.new", json!({})).unwrap();
+    harness.state_mut().run("slide.go", json!({"index": 0})).unwrap();
+    harness.run_steps(2);
+    assert!(harness.state().slide_rect.unwrap().width() > 230.0);
+    let desktop_width = harness.state().ui.thumbs_width;
+    harness.get_by_label("Slides").click();
+    harness.run_steps(2);
+    assert!(harness.state().ui.compact_slides);
+    harness.get_by_label("Slide 2").click();
+    harness.run_steps(2);
+    assert!(!harness.state().ui.compact_slides);
+    assert_eq!(harness.state().session.active().unwrap().selection.slide, 1);
+    assert!(harness.state().slide_rect.unwrap().width() > 230.0);
+    assert_eq!(harness.state().ui.thumbs_width, desktop_width);
+}
+
 /// #188: Ctrl/Cmd+A with the slide thumbnail pane focused selects every slide; with the
 /// canvas focused it still selects shapes.
 #[test]

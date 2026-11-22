@@ -57,6 +57,9 @@ pub struct UiState {
     pub notes: bool,
     pub notes_height: f32,
     pub thumbs_width: f32,
+    /// Whether the compact slide list is open in this window.
+    #[serde(skip)]
+    pub compact_slides: bool,
     /// Vertical scroll offset of the thumbnail pane, recorded each frame for the control
     /// channel and tests; not persisted.
     #[serde(skip)]
@@ -106,6 +109,7 @@ impl Default for UiState {
             notes: true,
             notes_height: 52.0,
             thumbs_width: 236.0,
+            compact_slides: false,
             thumbs_scroll: 0.0,
             pane: None,
             pane_width: 300.0,
