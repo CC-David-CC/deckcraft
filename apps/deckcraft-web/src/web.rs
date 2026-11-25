@@ -61,6 +61,14 @@ pub fn start() {
                     let mut app = SlideApp::new(Session::new(), services);
                     // In host mode the parent sends the presentation to edit; no sample meanwhile.
                     if app_bridge.is_some() {
+                        // The WebOS host restores saved account preferences after startup.
+                        // A new presentation uses the color scheme supplied by its frame.
+                        let dark = web_sys::window()
+                            .and_then(|window| window.match_media("(prefers-color-scheme: dark)").ok().flatten())
+                            .is_some_and(|media| media.matches());
+                        if dark {
+                            app.run("view.dark", serde_json::json!({ "on": true })).map_err(std::io::Error::other)?;
+                        }
                         if let Err(e) = app.start_for_host() {
                             log::error!("new presentation: {e}");
                         }
