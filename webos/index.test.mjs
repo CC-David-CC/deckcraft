@@ -200,8 +200,8 @@ test('unavailable intended account file retains Retry and never becomes a ready 
     options.readError=false;await f.view.retry();assert.equal(f.view.fileBinding.snapshot().path,'Talks/Missing.pptx');assert.equal(f.adoptions,1);
   }finally{f.view.dispose();}
 });
-test('copy export delivers create-only account bytes without changing document identity',async()=>{
-  const f=fixture();try{await f.view.ready;f.dispatch({type:'deckcraft:save',documentSave:false,name:'Presentation.pdf',bytes:Uint8Array.of(4,5).buffer});await choose(f.view,'path','Exports/Presentation.pdf');await until(()=>f.server.has('Exports/Presentation.pdf'));
+test('copy export adds its format to a bare name and preserves document identity',async()=>{
+  const f=fixture();try{await f.view.ready;f.dispatch({type:'deckcraft:save',documentSave:false,name:'Presentation.pdf',bytes:Uint8Array.of(4,5).buffer});await choose(f.view,'path','Exports/Presentation');await until(()=>f.server.has('Exports/Presentation.pdf'));
     assert.deepEqual(f.calls.find(call=>call[0]==='write'),['write','Exports/Presentation.pdf',null]);assert.equal(f.view.fileBinding.snapshot().path,null);assert.equal(f.calls.some(call=>call[0]==='native'&&call[2].command==='host.acknowledgeSave'),false);
   }finally{f.view.dispose();}
 });
